@@ -12,7 +12,7 @@ WorkingDirectory=/opt/finebi-feishu
 Environment=PYTHONPATH=/opt/finebi-feishu/src
 Environment=PYTHONUNBUFFERED=1
 # 客户环境 80/443 被 Docker NGINX 占用，应用监听 0.0.0.0:18080，
-# 由 Docker NGINX 通过主机内网 IP（本机 172.23.39.93:18080）反向代理。
+# 由 Docker NGINX 通过主机内网 IP（本机 应用服务器内网IP:18080）反向代理。
 # 18080 不要对公网安全组放行。
 ExecStart=/opt/finebi-feishu/.venv/bin/python -m executor.web \
     --host 0.0.0.0 --port 18080 \
