@@ -1,0 +1,16 @@
+{
+  "status": 200,
+  "data": [
+    {
+      "status": true,
+      "data": {
+        "managePrivilege": false,
+        "biData": false,
+        "empowerPrivilege": false,
+        "biView": false,
+        "usePrivilege": false
+      }
+    }
+  ],
+  "traceId": "fixture-trace-id"
+}

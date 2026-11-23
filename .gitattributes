@@ -1,0 +1,5 @@
+# Linux 部署文件必须是 LF，避免从 Windows 打包后 shebang/配置带 CRLF
+*.sh text eol=lf
+deploy/systemd/* text eol=lf
+deploy/cron/* text eol=lf
+deploy/nginx/* text eol=lf

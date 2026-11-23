@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}登录 - FineBI 数据权限申请{% endblock %}
+{% block content %}
+<div class="login-wrap">
+<div class="card">
+  <h1>FineBI 数据权限申请</h1>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  {% if users %}
+  <p class="muted">本地验证模式：选择一个测试账号登录。</p>
+  <form method="post" action="/login">
+    <label>测试账号</label>
+    <select name="user_id">
+      {% for u in users %}
+      <option value="{{ u.id }}">{{ u.name }}（{{ u.roles|join(' / ') }}）</option>
+      {% endfor %}
+    </select>
+    <p><button type="submit">登录</button></p>
+  </form>
+  {% else %}
+  <p class="muted">未配置测试账号，请在 config 的 policy.web_approval.users 中添加。</p>
+  {% endif %}
+  <p class="muted">飞书登录模式：设置 WEB_AUTH_MODE=feishu 并配置 OAuth 回调地址。</p>
+</div>
+</div>
+{% endblock %}

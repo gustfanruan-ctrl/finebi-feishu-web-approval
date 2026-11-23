@@ -1,0 +1,13 @@
+[
+  {
+    "user": "10086",
+    "packId": "102a8a2183cf4304ae566abedca05c60",
+    "authority": {
+      "biData": true,
+      "biView": true,
+      "usePrivilege": true,
+      "managePrivilege": true,
+      "empowerPrivilege": true
+    }
+  }
+]

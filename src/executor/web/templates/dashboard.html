@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}我的申请 - FineBI 数据权限申请{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>待我审批（{{ inbox|length }}）</h2>
+  {% if inbox %}
+  <table>
+    <thead><tr><th>申请单</th><th>申请人</th><th>资源</th><th>风险</th><th>提交时间</th></tr></thead>
+    <tbody>
+      {% for r in inbox %}
+      <tr>
+        <td><a href="/requests/{{ r.id }}">{{ r.id }}</a></td>
+        <td>{{ r.applicant.name if r.applicant else r.applicant_id }}</td>
+        <td>{{ resource_labels.get(r.payload.resource_type, r.payload.resource_type) }} / {{ r.payload.resource_name or r.payload.resource_id }}</td>
+        <td>{{ r.risk }}</td>
+        <td class="muted">{{ r.created_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">暂无待办。</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>我的申请（{{ my_requests|length }}）</h2>
+  {% if my_requests %}
+  <table>
+    <thead><tr><th>申请单</th><th>资源</th><th>状态</th><th>风险</th><th>提交时间</th></tr></thead>
+    <tbody>
+      {% for r in my_requests %}
+      <tr>
+        <td><a href="/requests/{{ r.id }}">{{ r.id }}</a></td>
+        <td>{{ resource_labels.get(r.payload.resource_type, r.payload.resource_type) }} / {{ r.payload.resource_name or r.payload.resource_id }}</td>
+        <td><span class="badge {{ r.status }}">{{ status_labels.get(r.status, r.status) }}</span></td>
+        <td>{{ r.risk }}</td>
+        <td class="muted">{{ r.created_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">还没有申请，<a href="/requests/new">新建一条</a>。</p>{% endif %}
+</div>
+{% endblock %}

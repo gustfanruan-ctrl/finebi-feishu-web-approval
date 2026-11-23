@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh FineBI catalog and role/department snapshots every 6 hours
+
+[Timer]
+# 每 6 小时：00:00 / 06:00 / 12:00 / 18:00
+OnCalendar=*-*-* 00/6:00:00
+# 关机/重启期间错过的任务在开机后补跑一次（生产环境建议保留）
+Persistent=true
+RandomizedDelaySec=300
+Unit=finebi-directory-refresh.service
+
+[Install]
+WantedBy=timers.target

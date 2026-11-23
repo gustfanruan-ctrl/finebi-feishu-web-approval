@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}新建申请 - FineBI 数据权限申请{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>新建权限申请</h1>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="post" action="/requests/new">
+    <label>数据资源</label>
+    <select name="resource_id" id="resource_id" required onchange="syncType()">
+      <option value="">请选择资源（来自 catalog 导出 / config.resources）</option>
+      {% for r in resources %}
+      <option value="{{ r.id }}" data-type="{{ r.type }}" data-name="{{ r.name }}">{{ resource_labels.get(r.type, r.type) }} / {{ r.name }}（{{ r.path }}）</option>
+      {% endfor %}
+    </select>
+    <input type="hidden" name="resource_type" id="resource_type" value="">
+    <input type="hidden" name="resource_name" id="resource_name" value="">
+
+    <label>权限项（可多选）</label>
+    <div class="actions">
+      {% for value, label in [("use","使用"),("manage","管理"),("empower","授权"),("component","组件数据"),("view","查看"),("export","导出"),("edit","编辑")] %}
+      <label><input type="checkbox" name="actions" value="{{ value }}"> {{ label }}</label>
+      {% endfor %}
+    </div>
+
+    <div class="row">
+      <div>
+        <label>使用期限</label>
+        <select name="days">
+          <option value="30">30 天</option>
+          <option value="60">60 天</option>
+          <option value="90" selected>90 天</option>
+          <option value="180">180 天</option>
+        </select>
+      </div>
+      <div>
+        <label>数据范围（仅行权限）</label>
+        <input type="text" name="data_scope" placeholder="大区=华东,华南;渠道=天猫">
+      </div>
+    </div>
+
+    <label>申请理由</label>
+    <textarea name="reason" placeholder="业务场景、使用目的"></textarea>
+    <p><button type="submit">提交审批</button> <a href="/" class="muted">返回</a></p>
+  </form>
+</div>
+<script>
+function syncType() {
+  var sel = document.getElementById('resource_id');
+  var opt = sel.options[sel.selectedIndex];
+  document.getElementById('resource_type').value = opt ? (opt.dataset.type || '') : '';
+  document.getElementById('resource_name').value = opt ? (opt.dataset.name || '') : '';
+}
+</script>
+{% endblock %}

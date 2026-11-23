@@ -1,0 +1,12 @@
+# 核心运行仅依赖 Python 标准库（urllib/sqlite3/json）
+# HTTP API 服务为可选依赖：
+fastapi>=0.110
+uvicorn[standard]>=0.27
+# FineDB 只读（飞书用户映射/行权限枚举）
+PyMySQL>=1.1
+# MySQL 8 caching_sha2_password 认证需要
+cryptography>=41
+# 联调/脚本可选：
+requests>=2.31
+jinja2>=3.1
+python-multipart>=0.0.9

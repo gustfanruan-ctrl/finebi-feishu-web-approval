@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}后台管理{% endblock %}
+{% block content %}
+{% if message %}<div class="card" style="color:var(--green);">{{ message }}</div>{% endif %}
+{% if error %}<div class="card error">{{ error }}</div>{% endif %}
+{% include "_admin_panel.html" %}
+{% endblock %}

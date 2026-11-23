@@ -1,0 +1,13 @@
+[Unit]
+Description=FineBI user roles/departments snapshot refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=finebi
+Group=finebi
+WorkingDirectory=/opt/finebi-feishu
+Environment=PYTHONPATH=/opt/finebi-feishu/src
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/finebi-feishu/.venv/bin/python -m executor.cli sync-membership

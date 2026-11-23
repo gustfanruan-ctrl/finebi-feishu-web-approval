@@ -1,0 +1,51 @@
+{
+  "policy": {
+    "form_mapping": {
+      "field_user": "FineBI账号",
+      "field_resource": "数据资源",
+      "field_actions": "权限项",
+      "field_days": "使用期限",
+      "field_scope": "数据范围",
+      "field_role": "角色",
+      "field_template": "权限模板",
+      "default_days": 90,
+      "resource_type_map": {
+        "文件夹使用": "folder",
+        "数据集使用": "table",
+        "行权限": "row",
+        "列权限": "field",
+        "仪表板查看": "dashboard_view",
+        "仪表板导出": "dashboard_export",
+        "公共链接": "publink",
+        "仪表板分享": "dash_share",
+        "主题协作": "subject"
+      },
+      "action_map": {
+        "使用": "use",
+        "管理": "manage",
+        "授权": "empower",
+        "组件数据": "component",
+        "查看": "view",
+        "导出": "export",
+        "编辑": "edit"
+      },
+      "row_field_ids": {},
+      "resources": {}
+    },
+    "filter_type_map": {
+      "34": "and",
+      "35": "or",
+      "10": "strIn",
+      "12": "strNotIn"
+    },
+    "web_approval": {
+      "users": [],
+      "row_sample_user": "",
+      "row_value_options": {},
+      "default_owner": "",
+      "default_approver": ""
+    }
+  },
+  "templates": {},
+  "resources": {}
+}

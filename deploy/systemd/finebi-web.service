@@ -1,0 +1,25 @@
+[Unit]
+Description=FineBI x Feishu web approval (uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 按实际部署路径/用户修改
+User=finebi
+Group=finebi
+WorkingDirectory=/opt/finebi-feishu
+Environment=PYTHONPATH=/opt/finebi-feishu/src
+Environment=PYTHONUNBUFFERED=1
+# 客户环境 80/443 被 Docker NGINX 占用，应用监听 0.0.0.0:18080，
+# 由 Docker NGINX 通过主机内网 IP（本机 172.23.39.93:18080）反向代理。
+# 18080 不要对公网安全组放行。
+ExecStart=/opt/finebi-feishu/.venv/bin/python -m executor.web \
+    --host 0.0.0.0 --port 18080 \
+    --forwarded-allow-ips 127.0.0.1
+Restart=always
+RestartSec=3
+# 日志：journalctl -u finebi-web -n 200
+
+[Install]
+WantedBy=multi-user.target

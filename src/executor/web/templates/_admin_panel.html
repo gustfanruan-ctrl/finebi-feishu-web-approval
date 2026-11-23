@@ -1,0 +1,433 @@
+{% macro render_owner_rows(nodes, depth, display) -%}
+{%- for n in nodes %}
+<tr class="owner-row" data-depth="{{ depth }}" data-key="{{ n.owner_key or '' }}" data-name="{{ n.name }}" data-path="{{ n.path or '' }}" data-has-children="{{ 1 if n.children else 0 }}">
+  <td class="owner-name-cell">
+    <span class="owner-indent" style="width:{{ depth * 20 }}px;"></span>
+    {% if n.children %}<button type="button" class="owner-toggle" onclick="toggleOwnerRows(this)">▸</button>{% else %}<span class="owner-toggle-spacer"></span>{% endif %}
+    <span class="owner-node-name">{{ n.name }}</span>
+    {% if n.children %}<span class="owner-kind">文件夹</span>{% endif %}
+  </td>
+  {%- set info = display.get(n.owner_key or '', {}) %}
+  <td class="owner-names">
+    {%- set d = info.get('data', {}) %}
+    <div>数据：{% if d.get('names') %}{{ d.get('names')|join('、') }}{% if d.get('inherited') %}<span class="muted">（继承自 {{ d.get('from') }}）</span>{% endif %}{% else %}<span class="muted">未配置</span>{% endif %}</div>
+    {%- set b = info.get('business', {}) %}
+    <div>业务：{% if b.get('names') %}{{ b.get('names')|join('、') }}{% if b.get('inherited') %}<span class="muted">（继承自 {{ b.get('from') }}）</span>{% endif %}{% else %}<span class="muted">未配置</span>{% endif %}</div>
+  </td>
+  <td><button type="button" class="btn-mini" onclick="editOwnerRow(this)">配置</button></td>
+</tr>
+{{ render_owner_rows(n.children, depth + 1, display) }}
+{%- endfor %}
+{%- endmacro %}
+
+{% set ds = directory_status or {} %}
+<section class="panel active" data-panel="admin_panel">
+  <div class="card">
+    <h2>目录与角色/部门刷新</h2>
+    <p class="muted">每 {{ ds.interval_hours or 6 }} 小时自动刷新数据目录、仪表板目录、角色和部门{% if ds.last_refresh %}；上次刷新：{{ ds.last_refresh[:16] | replace('T', ' ') }}{% endif %}{% if ds.next_refresh %}；下次约：{{ ds.next_refresh[:16] | replace('T', ' ') }}{% endif %}。刷新会重新读取 FineBI 当前资源，后期新增的数据集、仪表板、部门、角色都会自动纳入，无需改代码。{% if ds.running %}当前正在刷新…{% endif %}</p>
+    {% if ds.catalog and ds.catalog.summary %}<p class="muted">当前快照：数据集 {{ ds.catalog.summary.tables or 0 }}、仪表板 {{ ds.catalog.summary.dashboards or 0 }}、文件夹 {{ ds.catalog.summary.folders or 0 }}；角色 {{ ds.membership.roles or 0 }}、部门 {{ ds.membership.departments or 0 }}。</p>{% endif %}
+    {% if ds.errors %}<p class="error">上次刷新错误：{{ (ds.errors or [])|join('；') }}</p>{% endif %}
+    <form method="post" action="/admin/refresh-directory">
+      <p><button type="submit">立即刷新</button></p>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>FineBI 数据接口（行权限去重值）</h2>
+    {% set api = data_api_status or {} %}
+    <p class="muted">用于行权限下拉从数据集真实数据读取去重值。配置会加密保存到本地数据库，重启/升级不丢失；优先使用 token，也可以配置只读服务账号自动登录并刷新 token。</p>
+    <p class="muted">当前：
+      {% if api.configured %}已配置（来源：{{ '后台保存' if api.source == 'admin' else '环境变量' }}）；
+        {% if api.username %}账号 {{ api.username }}；{% endif %}
+        {% if api.has_password %}密码已保存；{% endif %}
+        {% if api.has_token %}token 已保存；{% endif %}
+      {% else %}未配置{% endif %}
+      {% if api.last_test_at %}<br>上次测试：{{ api.last_test_at[:16] | replace('T', ' ') }}
+        {% if api.last_test_ok %}<span style="color:var(--green)">成功</span>{% else %}<span class="error">失败</span>{% endif %}
+        {{ api.last_test_message }}{% endif %}
+    </p>
+    <form method="post" action="/admin/data-api">
+      <label>FineBI 服务账号（只读账号）</label>
+      <input name="username" value="{{ api.username or '' }}" placeholder="服务账号用户名" autocomplete="off">
+      <label>密码（留空表示不修改）</label>
+      <input type="password" name="password" placeholder="只从服务器提交，不回显" autocomplete="new-password">
+      <label>或 FineBI 登录 token（fine_auth_token；留空表示不修改）</label>
+      <input type="password" name="user_token" placeholder="已有 token 时可直接填" autocomplete="off">
+      <label><input type="checkbox" name="clear_all" value="true"> 清除已保存的数据接口凭证</label>
+      <p><button type="submit">保存数据接口配置</button></p>
+    </form>
+    <form method="post" action="/admin/data-api/test">
+      <p><button type="submit" class="secondary">测试连接</button>
+        <span class="muted">会读取目录中第一个公共数据集 1 行样例，不写入任何权限。</span></p>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>角色/部门申请审批人</h2>
+    <p class="muted">统一配置一个审批人，对「角色/部门申请」生效；未配置时回退 default_approver / admin。审批人从飞书通讯录选，只需要飞书账号，不需要 FineBI 账号。</p>
+    <form method="post" action="/admin/membership-owner">
+      <label>审批人</label>
+      <select name="owner_ref" id="membership-owner-ref">
+        <option value="">未配置（回退默认审批人）</option>
+        {% for u in users %}<option value="local:{{ u.id }}"{% if u.id == membership_owner_id %} selected{% endif %}>{{ u.name }}（{{ u.fb_user or u.id }}）</option>{% endfor %}
+      </select>
+      <p><button type="submit">保存</button></p>
+    </form>
+    <p class="muted">当前：{{ membership_owner.name if membership_owner else '未配置' }}</p>
+  </div>
+
+  <div class="card">
+    <h2>默认审批人（兜底）</h2>
+    <p class="muted">仪表板/公共数据没有配置 Owner、角色/部门未配统一审批人时，用这里的默认审批人兜底；未配置则回退 config.json 的 default_approver / admin。审批人从飞书通讯录选，只需要飞书账号，不需要 FineBI 账号。</p>
+    <form method="post" action="/admin/default-approver">
+      <label>默认审批人</label>
+      <select name="owner_ref" id="default-approver-ref">
+        <option value="">未配置（回退 config.json / admin）</option>
+        {% for u in users %}<option value="local:{{ u.id }}"{% if u.id == default_approver_id %} selected{% endif %}>{{ u.name }}（{{ u.fb_user or u.id }}）</option>{% endfor %}
+      </select>
+      <p><button type="submit">保存</button></p>
+    </form>
+    <p class="muted">当前：{{ default_approver.name if default_approver else '未配置' }}</p>
+  </div>
+
+  <div class="card">
+    <h2>资源 Owner 配置</h2>
+    <p class="muted">在目录树里点「配置」：选文件夹 = 该目录下未单独配置的资源继承此 Owner；选单个仪表板/数据集 = 只对该资源生效。Owner 从飞书通讯录选（只需要飞书账号，不需要 FineBI 账号），可多选、可搜索；保存为覆盖式。</p>
+    <div class="subtabs">
+      <button type="button" class="subtab active" data-owner-tree="dashboard">仪表板目录</button>
+      <button type="button" class="subtab" data-owner-tree="public">公共数据目录</button>
+    </div>
+    <div class="owner-tree-panel" id="owner-tree-dashboard">
+      <input class="tree-search" placeholder="搜索仪表板/文件夹…" oninput="filterOwnerRows(this.value)">
+      <table class="owner-tree-table">
+        <thead><tr><th>资源目录</th><th>Owner</th><th style="width:76px;">操作</th></tr></thead>
+        <tbody>{{ render_owner_rows(dashboard_tree, 0, owner_display_dashboard) }}</tbody>
+      </table>
+    </div>
+    <div class="owner-tree-panel" id="owner-tree-public" style="display:none">
+      <input class="tree-search" placeholder="搜索数据集/文件夹…" oninput="filterOwnerRows(this.value)">
+      <table class="owner-tree-table">
+        <thead><tr><th>资源目录</th><th>Owner</th><th style="width:76px;">操作</th></tr></thead>
+        <tbody>{{ render_owner_rows(public_tree, 0, owner_display_public) }}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <dialog id="owner-dialog" class="owner-dialog">
+    <form method="post" action="/admin/owners" id="owner-form">
+      <h2>配置 Owner：<span id="owner-dialog-title"></span></h2>
+      <p class="muted">审批顺序：数据 Owner → 业务 Owner；Owner 只需要飞书账号，不需要 FineBI 账号。</p>
+      <input type="hidden" name="resource_type" id="owner-resource-type">
+      <input type="hidden" name="resource_id" id="owner-resource-id">
+      <div class="row">
+        <div>
+          <label>数据 Owner</label>
+          <select name="data_owner_ref" id="data-owner-ref">
+            <option value="">未配置</option>
+            {% for u in users %}<option value="local:{{ u.id }}">{{ u.name }}（本地账号）</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>业务 Owner</label>
+          <select name="business_owner_ref" id="business-owner-ref">
+            <option value="">未配置</option>
+            {% for u in users %}<option value="local:{{ u.id }}">{{ u.name }}（本地账号）</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <p class="muted" id="owner-contact-status">正在加载飞书通讯录…</p>
+      <p><button type="submit">保存</button>
+        <button type="button" class="secondary" onclick="closeOwnerDialog()">取消</button></p>
+    </form>
+  </dialog>
+
+  <div class="card">
+    <h2>飞书用户映射</h2>
+    <p class="muted">飞书账号 ↔ FineBI 账号。登录时优先按飞书 user_id 查 FineDB 映射；匹配不对时可在下表直接改 FineBI 账号并保存。</p>
+    {% if contacts_status %}
+    <p class="muted">通讯录快照：{{ contacts_status.total or 0 }} 人，上次同步 {{ (contacts_status.last_refresh or '')[:16] | replace('T', ' ') }}{% if contacts_status.error %}（{{ contacts_status.error }}）{% endif %}。定时任务每天 0 点刷新，后台选择框只读快照，不再实时遍历。</p>
+    {% else %}
+    <p class="muted">通讯录快照为空：点「从飞书通讯录同步」，或等待定时任务刷新。</p>
+    {% endif %}
+    <form method="post" action="/admin/sync-users">
+      <button type="submit">从飞书通讯录同步</button>
+    </form>
+    <form method="get" action="/admin" style="display:flex;gap:8px;align-items:center;margin-top:12px;">
+      <input type="search" name="map_q" value="{{ map_q }}" placeholder="搜索姓名 / 飞书 ID / FineBI 账号" style="max-width:280px;">
+      <button type="submit" class="secondary">搜索</button>
+      <span class="muted">共 {{ mapping_total }} 条</span>
+    </form>
+    <table style="margin-top:12px;">
+      <thead><tr><th>姓名</th><th>飞书 open_id</th><th>飞书 user_id</th><th>FineBI 账号</th><th>角色</th></tr></thead>
+      <tbody>
+      {% for m in mappings %}
+      <tr>
+        <td>{{ m.name }}</td>
+        <td>{{ m.feishu_open_id or '-' }}</td>
+        <td>{{ m.feishu_user_id or '-' }}</td>
+        <td>
+          <form method="post" action="/admin/users/mapping" style="display:flex;gap:6px;align-items:center;margin:0;">
+            <input type="hidden" name="user_id" value="{{ m.id }}">
+            <input type="text" name="fb_user" value="{{ m.fb_user or '' }}" placeholder="FineBI 用户名" style="width:150px;">
+            <button type="submit" class="secondary">保存</button>
+          </form>
+        </td>
+        <td>{{ m.roles|join('/') }}</td>
+      </tr>
+      {% else %}<tr><td colspan="5" class="muted">暂无映射</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    {% if mapping_pages > 1 %}
+    <p style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+      {% if mapping_page > 1 %}
+      <a href="/admin?map_page={{ mapping_page - 1 }}&amp;map_q={{ map_q|urlencode }}">‹ 上一页</a>
+      {% endif %}
+      <span class="muted">第 {{ mapping_page }} / {{ mapping_pages }} 页，共 {{ mapping_total }} 条</span>
+      {% if mapping_page < mapping_pages %}
+      <a href="/admin?map_page={{ mapping_page + 1 }}&amp;map_q={{ map_q|urlencode }}">下一页 ›</a>
+      {% endif %}
+    </p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>离职交接</h2>
+    <p class="muted">清除原账号权限，把资源/权限交接给目标用户；目标用户已有权限保留，不覆盖。</p>
+    <form method="post" action="/admin/offboard">
+      <div class="row">
+        <div><label>原用户</label>
+          <select name="source_id">
+            {% for u in users %}<option value="{{ u.id }}">{{ u.name }}（{{ u.fb_user or u.id }}）</option>{% endfor %}
+          </select>
+        </div>
+        <div><label>目标用户</label>
+          <select name="target_id">
+            {% for u in users %}<option value="{{ u.id }}">{{ u.name }}（{{ u.fb_user or u.id }}）</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <p><button class="danger" type="submit">执行离职交接</button></p>
+    </form>
+  </div>
+</section>
+
+<script>
+var OWNER_IDS = {{ owner_ids_json|safe }};
+var MEMBERSHIP_OWNER_ID = {{ membership_owner_id|tojson }};
+var DEFAULT_APPROVER_ID = {{ default_approver_id|tojson }};
+var OWNER_TYPE_LABELS = { dashboard_folder: '文件夹', folder: '文件夹', dashboard: '仪表板', table: '数据集' };
+
+function ownerTypeLabel(type) { return OWNER_TYPE_LABELS[type] || type; }
+
+function toggleOwnerRows(btn) {
+  var tr = btn.closest('tr');
+  var depth = parseInt(tr.dataset.depth || '0', 10);
+  var open = tr.dataset.open !== '1';
+  tr.dataset.open = open ? '1' : '0';
+  btn.textContent = open ? '▾' : '▸';
+  var next = tr.nextElementSibling;
+  while (next && next.classList.contains('owner-row')) {
+    var d = parseInt(next.dataset.depth || '0', 10);
+    if (d <= depth) break;
+    if (d === depth + 1) next.style.display = open ? '' : 'none';
+    next = next.nextElementSibling;
+  }
+}
+
+function filterOwnerRows(q) {
+  q = (q || '').trim().toLowerCase();
+  document.querySelectorAll('.owner-tree-panel').forEach(function(panel) {
+    if (panel.style.display === 'none') return;
+    var rows = Array.prototype.slice.call(panel.querySelectorAll('.owner-row'));
+    if (!q) {
+      rows.forEach(function(tr) {
+        var d = parseInt(tr.dataset.depth || '0', 10);
+        tr.style.display = d > 0 ? 'none' : '';
+        tr.dataset.open = '0';
+        var btn = tr.querySelector('.owner-toggle');
+        if (btn) btn.textContent = '▸';
+      });
+      return;
+    }
+    var visible = new Set();
+    var stack = [];
+    rows.forEach(function(tr) {
+      var d = parseInt(tr.dataset.depth || '0', 10);
+      stack = stack.slice(0, d);
+      stack.push(tr);
+      var text = ((tr.dataset.name || '') + ' ' + (tr.dataset.path || '')).toLowerCase();
+      if (text.indexOf(q) >= 0) stack.forEach(function(x) { visible.add(x); });
+    });
+    rows.forEach(function(tr) { tr.style.display = visible.has(tr) ? '' : 'none'; });
+    rows.forEach(function(tr) {
+      if (visible.has(tr) && tr.dataset.hasChildren === '1') {
+        tr.dataset.open = '1';
+        var btn = tr.querySelector('.owner-toggle');
+        if (btn) btn.textContent = '▾';
+      }
+    });
+  });
+}
+
+function _ownerSelectMatchId(select, ids) {
+  var match = '';
+  Array.prototype.forEach.call(select.options, function(o) {
+    var localId = o.dataset.localId
+      || (o.value.indexOf('local:') === 0 ? o.value.slice(6) : '');
+    if (!match && localId && ids.indexOf(localId) >= 0) match = o.value;
+  });
+  return match;
+}
+
+function _attachContactSearch(select) {
+  if (!select || select.dataset.searchAttached === '1') return;
+  select.dataset.searchAttached = '1';
+  var input = document.createElement('input');
+  input.type = 'search';
+  input.placeholder = '搜索姓名/手机号/邮箱';
+  input.className = 'contact-search';
+  input.style.cssText = 'display:block;margin:4px 0;width:100%;max-width:360px;';
+  select.parentNode.insertBefore(input, select);
+  input.addEventListener('input', function() {
+    var kw = input.value.trim().toLowerCase();
+    var all = select._allOptions || [];
+    if (!all.length) return;
+    var current = select.value;
+    var matched = all.filter(function(o) {
+      if (o.value === '') return true;
+      return !kw || (o.text || '').toLowerCase().indexOf(kw) >= 0
+        || (o.value || '').toLowerCase().indexOf(kw) >= 0;
+    });
+    select.innerHTML = '';
+    matched.forEach(function(o) {
+      var opt = document.createElement('option');
+      opt.value = o.value;
+      opt.textContent = o.text;
+      select.appendChild(opt);
+    });
+    var keep = matched.some(function(o) { return o.value === current; });
+    if (keep) select.value = current;
+    else if (matched.length > 1) select.value = matched[1].value;
+  });
+}
+
+function editOwnerRow(btn) {
+  var tr = btn.closest('tr');
+  var key = tr.dataset.key || '';
+  var idx = key.indexOf(':');
+  if (idx < 0) return;
+  var type = key.slice(0, idx);
+  var rid = key.slice(idx + 1);
+  var dialog = document.getElementById('owner-dialog');
+  if (!dialog) return;
+  document.getElementById('owner-resource-type').value = type;
+  document.getElementById('owner-resource-id').value = rid;
+  document.getElementById('owner-dialog-title').textContent =
+    (tr.dataset.name || rid) + '（' + ownerTypeLabel(type) + '）';
+  var dataSelect = document.getElementById('data-owner-ref');
+  var bizSelect = document.getElementById('business-owner-ref');
+  if (dataSelect) {
+    dataSelect.value = _ownerSelectMatchId(dataSelect, OWNER_IDS[key + '|data'] || []);
+  }
+  if (bizSelect) {
+    bizSelect.value = _ownerSelectMatchId(bizSelect, OWNER_IDS[key + '|business'] || []);
+  }
+  if (dialog.showModal) dialog.showModal();
+  else dialog.setAttribute('open', '');
+}
+
+function closeOwnerDialog() {
+  var dialog = document.getElementById('owner-dialog');
+  if (!dialog) return;
+  if (dialog.close) dialog.close();
+  else dialog.removeAttribute('open');
+}
+
+function loadOwnerContacts() {
+  var dataSelect = document.getElementById('data-owner-ref');
+  var bizSelect = document.getElementById('business-owner-ref');
+  var membershipSelect = document.getElementById('membership-owner-ref');
+  var defaultSelect = document.getElementById('default-approver-ref');
+  var selects = [dataSelect, bizSelect, membershipSelect, defaultSelect].filter(Boolean);
+  if (!selects.length) return;
+  // 先把搜索框挂上，通讯录加载慢时也不至于“看起来没有搜索”
+  selects.forEach(function(select) { _attachContactSearch(select); });
+  fetch('/api/contacts')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var items = data.items || [];
+      var status = document.getElementById('owner-contact-status');
+      if (!items.length) {
+        if (status) status.textContent = '飞书通讯录暂不可用，仅显示本地账号。';
+        return;
+      }
+      selects.forEach(function(select) {
+        Array.prototype.slice.call(select.options).forEach(function(o) {
+          if (o.value.indexOf('local:') === 0) select.removeChild(o);
+        });
+        items.forEach(function(it) {
+          if (!it.ref) return;
+          var opt = document.createElement('option');
+          opt.value = it.ref;
+          if (it.local_user_id) opt.dataset.localId = it.local_user_id;
+          var label = it.name || it.ref;
+          var contact = it.email || it.mobile || '';
+          if (contact) label += '（' + contact + '）';
+          opt.textContent = label;
+          select.appendChild(opt);
+        });
+      });
+      selects.forEach(function(select) {
+        select._allOptions = Array.prototype.map.call(select.options, function(o) {
+          return {value: o.value, text: o.textContent || ''};
+        });
+        _attachContactSearch(select);
+      });
+      if (membershipSelect) {
+        membershipSelect.value = _ownerSelectMatchId(membershipSelect,
+          MEMBERSHIP_OWNER_ID ? [MEMBERSHIP_OWNER_ID] : []);
+      }
+      if (defaultSelect) {
+        defaultSelect.value = _ownerSelectMatchId(defaultSelect,
+          DEFAULT_APPROVER_ID ? [DEFAULT_APPROVER_ID] : []);
+      }
+      if (status) {
+        status.textContent = '飞书通讯录已加载 ' + items.length
+          + ' 人，可搜索姓名/手机号/邮箱。';
+      }
+    })
+    .catch(function() {
+      var status = document.getElementById('owner-contact-status');
+      if (status) status.textContent = '飞书通讯录读取失败，仅显示本地账号。';
+    });
+}
+
+if (document.querySelectorAll('.owner-row').length) {
+  document.querySelectorAll('.owner-row').forEach(function(tr) {
+    if (parseInt(tr.dataset.depth || '0', 10) > 0) tr.style.display = 'none';
+  });
+  document.querySelectorAll('[data-owner-tree]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('[data-owner-tree]').forEach(function(x) { x.classList.remove('active'); });
+      btn.classList.add('active');
+      var target = btn.dataset.ownerTree;
+      var dash = document.getElementById('owner-tree-dashboard');
+      var pub = document.getElementById('owner-tree-public');
+      if (dash) dash.style.display = target === 'dashboard' ? '' : 'none';
+      if (pub) pub.style.display = target === 'public' ? '' : 'none';
+    });
+  });
+  var ownerDialog = document.getElementById('owner-dialog');
+  if (ownerDialog) {
+    ownerDialog.addEventListener('click', function(e) {
+      if (e.target === ownerDialog) closeOwnerDialog();
+    });
+  }
+}
+
+if (document.getElementById('membership-owner-ref')
+    || document.getElementById('default-approver-ref')
+    || document.getElementById('data-owner-ref')) {
+  loadOwnerContacts();
+}
+</script>

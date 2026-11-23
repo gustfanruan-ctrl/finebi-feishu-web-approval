@@ -1,0 +1,9 @@
+{
+  "status": 200,
+  "data": [
+    {
+      "status": true,
+      "data": "{\"id\":\"760894855e8e4662\",\"filterType\":35,\"filterValue\":[{\"id\":\"5fb8da3700904e9e\",\"filterType\":10,\"fieldId\":\"t_region\",\"filterValue\":{\"type\":1,\"value\":[\"华东\"]}},{\"id\":\"925eb55cc1fe4159\",\"filterType\":10,\"fieldId\":\"t_region\",\"filterValue\":{\"type\":1,\"value\":[\"华南\"]}}]}"
+    }
+  ]
+}

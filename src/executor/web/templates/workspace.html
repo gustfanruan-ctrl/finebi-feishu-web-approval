@@ -1,0 +1,792 @@
+{% extends "base.html" %}
+{% block title %}数据权限申请{% endblock %}
+{% block content %}
+{% macro render_tree(nodes) -%}
+<ul class="tree">
+{%- for n in nodes %}
+<li>
+{%- if n.children %}
+<details>
+  <summary><span class="tree-label">{{ n.name }}{% if n.children and n.count %}（{{ n.count }}）{% endif %}</span>{% if n.selectable %}<button type="button" class="tree-pick" data-id="{{ n.resource_id }}" data-entry-id="{{ n.entry_id or '' }}" data-type="{{ n.resource_type }}" data-name="{{ n.name }}" data-path="{{ n.path or '' }}" data-count="{{ n.count or '' }}">选择</button>{% endif %}</summary>
+  {{ render_tree(n.children) }}
+</details>
+{%- else %}
+<div class="tree-leaf" data-id="{{ n.resource_id }}" data-entry-id="{{ n.entry_id or '' }}" data-type="{{ n.resource_type }}" data-name="{{ n.name }}" data-path="{{ n.path or '' }}">{{ n.name }}</div>
+{%- endif %}
+</li>
+{%- endfor %}
+</ul>
+{%- endmacro %}
+
+{% if message %}<div class="card" style="color:var(--green);">{{ message }}</div>{% endif %}
+{% if error %}<div class="card error">{{ error }}</div>{% endif %}
+{% set ds = directory_status or {} %}
+
+<div class="card">
+  <div class="tabs">
+    <button class="tab" data-tab="dashboard">仪表板权限</button>
+    <button class="tab" data-tab="public_data">公共数据权限</button>
+    <button class="tab" data-tab="admin_function">定时调度功能权限</button>
+    <button class="tab" data-tab="admin_task">定时调度任务管理权限</button>
+    <button class="tab" data-tab="admin_alert">数据预警权限</button>
+    <button class="tab" data-tab="membership">角色/部门申请</button>
+    <button class="tab" data-tab="my_requests">我的申请</button>
+    <button class="tab" data-tab="my_approvals">我的审批</button>
+  </div>
+</div>
+
+<div class="card">
+  <p class="muted" id="directory-status-note">
+    数据目录、仪表板目录、角色和部门信息每 {{ ds.interval_hours or 6 }} 小时自动刷新{% if ds.last_refresh %}，上次刷新：{{ ds.last_refresh[:16] | replace('T', ' ') }}{% endif %}{% if ds.next_refresh %}，下次约：{{ ds.next_refresh[:16] | replace('T', ' ') }}{% endif %}。后期新增的数据集、仪表板、部门、角色会在下一轮刷新后自动出现在下拉列表中；刚新增需要立即使用可联系管理员手动刷新。{% if ds.running %}（当前正在刷新…）{% endif %}{% if ds.ok is sameas false %}（上次刷新失败：{{ (ds.errors or [])|join('；') }}）{% endif %}
+  </p>
+</div>
+
+
+<!-- 1. 仪表板权限 -->
+<section class="panel" data-panel="dashboard">
+  <div class="card">
+    <h2>仪表板权限申请</h2>
+    <form method="post" action="/requests/new">
+      <input type="hidden" name="category" value="dashboard">
+      <label>仪表板（折叠目录）</label>
+      <div class="tree-select" id="dashboard-select">
+        <button type="button" class="tree-trigger" onclick="toggleTree('dashboard-select')">请选择仪表板</button>
+        <div class="tree-panel"><input class="tree-search" placeholder="搜索仪表板/文件夹…" oninput="filterTree(this.closest('.tree-panel'), this.value)">{{ render_tree(dashboard_tree) }}</div>
+      </div>
+      <input type="hidden" name="resource_id" id="dashboard-resource-id">
+      <input type="hidden" name="entry_id" id="dashboard-entry-id">
+      <input type="hidden" name="resource_type" id="dashboard-resource-type">
+      <input type="hidden" name="resource_path" id="dashboard-resource-path">
+      <input type="hidden" name="resource_name" id="dashboard-resource-name">
+      <p class="muted" id="dashboard-folder-hint"></p>
+      <p class="muted dashboard-deps-hint" id="dashboard-deps-hint"></p>
+      <p class="muted perm-status-hint" id="dashboard-perm-hint"></p>
+      <label>权限项</label>
+      <div class="actions">
+        <label><input type="checkbox" name="permissions" value="view" checked> 查看</label>
+        <label><input type="checkbox" name="permissions" value="export"> 导出</label>
+        <label><input type="checkbox" name="permissions" value="edit"> 编辑（含查看）</label>
+        <label><input type="checkbox" name="permissions" value="component" checked> 组件数据（连带依赖数据集，默认勾选）</label>
+      </div>
+      {% include "_period.html" %}
+      <label>申请理由</label>
+      <textarea name="reason" placeholder="业务场景、使用目的"></textarea>
+      <p><button type="submit">提交审批</button></p>
+    </form>
+  </div>
+</section>
+
+<!-- 2. 公共数据权限 -->
+<section class="panel" data-panel="public_data">
+  <div class="card">
+    <h2>公共数据权限申请</h2>
+    <form method="post" action="/requests/new" id="public-form">
+      <input type="hidden" name="category" value="public_data">
+      <label>数据资源（文件夹 / 数据集，折叠目录）</label>
+      <div class="tree-select" id="public-select">
+        <button type="button" class="tree-trigger" onclick="toggleTree('public-select')">请选择资源</button>
+        <div class="tree-panel"><input class="tree-search" placeholder="搜索数据集/文件夹…" oninput="filterTree(this.closest('.tree-panel'), this.value)">{{ render_tree(public_tree) }}</div>
+      </div>
+      <input type="hidden" name="resource_id" id="public-resource-id">
+      <input type="hidden" name="resource_type" id="public-resource-type">
+      <input type="hidden" name="resource_path" id="public-resource-path">
+      <input type="hidden" name="resource_name" id="public-resource-name">
+      <p class="muted perm-status-hint" id="public-perm-hint"></p>
+      <label>权限项</label>
+      <div class="actions">
+        <label><input type="checkbox" name="permissions" value="use" checked> 使用</label>
+        <label><input type="checkbox" name="permissions" value="manage"> 管理</label>
+        <label><input type="checkbox" name="permissions" value="component"> 组件数据</label>
+      </div>
+      <label><input type="checkbox" name="row_enabled" id="row-enabled" value="true" onchange="toggleRow()"> 申请行权限（数据集字段条件，可选）</label>
+      <div id="row-box" style="display:none;margin-left:18px;">
+        <label>行权限字段（可选择数据集任意字段）</label>
+        <select name="row_field" id="row-field" onchange="renderValues()"><option value="">请先选择数据集</option></select>
+        <label>条件</label>
+        <select name="row_operator" id="row-operator">
+          <option value="strIn">属于</option>
+          <option value="strNotIn">不属于</option>
+        </select>
+        <label>值（有枚举可直接搜索多选；无枚举可手动输入）</label>
+        <div id="row-values" class="multi-select-host"></div>
+        <p class="muted" id="row-hint">选择数据集后自动读取字段和可选枚举；没有枚举时可直接输入值。</p>
+      </div>
+      {% include "_period.html" %}
+      <label>申请理由</label>
+      <textarea name="reason" placeholder="业务场景、使用目的"></textarea>
+      <p><button type="submit">提交审批</button></p>
+    </form>
+  </div>
+</section>
+
+<!-- 3a. 定时调度功能权限 -->
+<section class="panel" data-panel="admin_function">
+  <div class="card">
+    <h2>定时调度功能权限</h2>
+    <p class="muted">授予“使用定时调度”功能，不需要选择具体任务。</p>
+    <form method="post" action="/requests/new">
+      <input type="hidden" name="category" value="admin">
+      <input type="hidden" name="permissions" value="use">
+      {% include "_period.html" %}
+      <label>申请理由</label>
+      <textarea name="reason"></textarea>
+      <p><button type="submit">提交审批</button></p>
+    </form>
+  </div>
+</section>
+
+<!-- 3b. 定时调度任务管理权限 -->
+<section class="panel" data-panel="admin_task">
+  <div class="card">
+    <h2>定时调度任务管理权限</h2>
+    <form method="post" action="/requests/new">
+      <input type="hidden" name="category" value="admin">
+      <label>定时调度任务</label>
+      <select name="schedule_task" required>
+        <option value="">请选择定时调度</option>
+        {% for s in schedules %}
+        <option value="{{ s.id }}">{{ s.name }}</option>
+        {% endfor %}
+      </select>
+      {% if not schedules %}<p class="muted">未读取到定时调度列表，请确认 FineBI 平台权限。</p>{% endif %}
+      <label>权限项</label>
+      <div class="actions">
+        <label><input type="checkbox" name="permissions" value="manage" checked> 管理</label>
+        <label><input type="checkbox" name="permissions" value="empower"> 授权</label>
+      </div>
+      {% include "_period.html" %}
+      <label>申请理由</label>
+      <textarea name="reason"></textarea>
+      <p><button type="submit">提交审批</button></p>
+    </form>
+  </div>
+</section>
+
+<!-- 3c. 数据预警权限 -->
+<section class="panel" data-panel="admin_alert">
+  <div class="card">
+    <h2>数据预警权限申请</h2>
+    <p class="muted">授予「数据预警（预警中心）」功能权限；审批通过后写入 FineBI 平台管理模块。</p>
+    <form method="post" action="/requests/new">
+      <input type="hidden" name="category" value="admin">
+      <input type="hidden" name="module" value="decision-management-warningcenter">
+      <input type="hidden" name="resource_name" value="数据预警（预警中心）">
+      <label>权限项</label>
+      <div class="actions">
+        <label><input type="checkbox" name="permissions" value="use" checked> 使用数据预警</label>
+        <label><input type="checkbox" name="permissions" value="empower"> 授权</label>
+      </div>
+      {% include "_period.html" %}
+      <label>申请理由</label>
+      <textarea name="reason" placeholder="业务场景、使用目的"></textarea>
+      <p><button type="submit">提交审批</button></p>
+    </form>
+  </div>
+</section>
+
+<!-- 3d. 角色/部门申请 -->
+<section class="panel" data-panel="membership">
+  <div class="card">
+    <h2>加入已有角色 / 部门</h2>
+    <p class="muted">把当前账号加入 FineBI 里已存在的角色或部门（只建立成员关系，不改动角色/部门本身的权限）。申请前已拥有的成员关系不会重复授予；到期只回收本次新增的部分。</p>
+    <p class="muted" id="membership-status">正在读取角色和部门列表…</p>
+  </div>
+  <div class="card">
+    <h2>申请加入角色</h2>
+    <form method="post" action="/requests/new">
+      <input type="hidden" name="category" value="membership">
+      <input type="hidden" name="membership_type" value="role">
+      <label>角色（可多选，搜索名称）</label>
+      <select name="targets" id="role-targets" multiple size="1"></select>
+      {% include "_period.html" %}
+      <label>申请理由</label>
+      <textarea name="reason" placeholder="业务场景、为什么需要该角色"></textarea>
+      <p><button type="submit">提交审批</button></p>
+    </form>
+  </div>
+  <div class="card">
+    <h2>申请加入部门</h2>
+    <form method="post" action="/requests/new">
+      <input type="hidden" name="category" value="membership">
+      <input type="hidden" name="membership_type" value="department">
+      <label>部门（可多选，按完整路径搜索）</label>
+      <select name="targets" id="department-targets" multiple size="1"></select>
+      {% include "_period.html" %}
+      <label>申请理由</label>
+      <textarea name="reason" placeholder="业务场景、为什么需要加入该部门"></textarea>
+      <p><button type="submit">提交审批</button></p>
+    </form>
+  </div>
+</section>
+
+<!-- 4. 我的申请 -->
+<section class="panel" data-panel="my_requests">
+  <div class="card">
+    <h2>我的申请</h2>
+    <table>
+      <thead><tr><th>申请单</th><th>分类</th><th>资源</th><th>状态</th><th>当前审批人</th><th>提交时间</th></tr></thead>
+      <tbody>
+      {% for r in my_requests %}
+      <tr>
+        <td><a href="/requests/{{ r.id }}">{{ r.payload.request_no or r.id }}</a></td>
+        <td>{{ category_labels.get(r.category, r.category) }}</td>
+        <td>{{ r.payload.resource_name or r.payload.resource_id }}</td>
+        <td><span class="badge {{ r.status }}">{{ status_labels.get(r.status, r.status) }}</span></td>
+        <td>{{ r.current_approver.name if r.current_approver else '-' }}</td>
+        <td class="muted">{{ r.created_at[:16]|replace('T', ' ') }}</td>
+      </tr>
+      {% else %}<tr><td colspan="6" class="muted">暂无申请</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 5. 我的审批 -->
+<section class="panel" data-panel="my_approvals">
+  <div class="card">
+    <h2>我的审批</h2>
+    <div class="subtabs">
+      <button class="subtab" data-subtab="pending">待审批（{{ approvals.pending|length }}）</button>
+      <button class="subtab" data-subtab="done">已审批（{{ approvals.done|length }}）</button>
+    </div>
+    <div class="subpanel" data-subpanel="pending">
+      <table>
+        <thead><tr><th>申请单</th><th>申请人</th><th>资源</th><th>提交时间</th></tr></thead>
+        <tbody>
+        {% for r in approvals.pending %}
+        <tr><td><a href="/requests/{{ r.id }}">{{ r.payload.request_no or r.id }}</a></td><td>{{ r.applicant.name if r.applicant else r.applicant_id }}</td><td>{{ r.payload.resource_name or r.payload.resource_id }}</td><td class="muted">{{ r.created_at[:16]|replace('T', ' ') }}</td></tr>
+        {% else %}<tr><td colspan="4" class="muted">暂无待审批</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="subpanel" data-subpanel="done" style="display:none;">
+      <table>
+        <thead><tr><th>申请单</th><th>申请人</th><th>资源</th><th>状态</th></tr></thead>
+        <tbody>
+        {% for r in approvals.done %}
+        <tr><td><a href="/requests/{{ r.id }}">{{ r.payload.request_no or r.id }}</a></td><td>{{ r.applicant.name if r.applicant else r.applicant_id }}</td><td>{{ r.payload.resource_name or r.payload.resource_id }}</td><td><span class="badge {{ r.status }}">{{ status_labels.get(r.status, r.status) }}</span></td></tr>
+        {% else %}<tr><td colspan="4" class="muted">暂无已审批</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<script>
+function showTab(name) {
+  document.querySelectorAll('.panel').forEach(p => { p.style.display = 'none'; p.classList.remove('active'); });
+  var panel = document.querySelector('.panel[data-panel="' + name + '"]');
+  if (panel) { panel.style.display = 'block'; panel.classList.add('active'); }
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+}
+document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+showTab({{ active_tab|tojson }});
+
+document.querySelectorAll('.subtab').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.subpanel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.subtab').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  var target = document.querySelector('.subpanel[data-subpanel="' + b.dataset.subtab + '"]');
+  if (target) target.style.display = '';
+}));
+var firstSub = document.querySelector('.subtab'); if (firstSub) firstSub.classList.add('active');
+
+var TYPE_LABELS = {folder:'文件夹', table:'数据集', dashboard:'仪表板'};
+var PERM_LABELS = {view: '查看', export: '导出', edit: '编辑', use: '使用',
+                   manage: '管理', empower: '权限设置', join: '成员关系',
+                   component: '组件数据', metadata: '元数据'};
+var _permHintSeq = 0;
+
+// 仪表板依赖的公共数据集：只列表，不生成额外流程单；组件数据随本申请单一起授权。
+function renderDashboardDeps(form, data) {
+  var depsHint = form.querySelector('.dashboard-deps-hint');
+  var compBox = form.querySelector('input[name="permissions"][value="component"]');
+  var category = form.querySelector('input[name="category"]');
+  if (!category || category.value !== 'dashboard') return;
+  var deps = (data && data.dependencies) || [];
+  if (depsHint) {
+    if (deps.length) {
+      depsHint.textContent = '该仪表板使用 ' + deps.length + ' 个数据集：'
+        + deps.map(function(d) { return d.name || d.resource_id; }).join('、')
+        + '（组件数据随本申请单一起授权，不另建流程单）';
+    } else if (data && data.known) {
+      depsHint.textContent = '未匹配到依赖数据集，可继续提交；组件数据可能不会生效，建议联系管理员刷新目录。';
+    } else {
+      depsHint.textContent = '依赖数据集读取失败，可继续提交；如需组件数据请先在后台刷新目录。';
+    }
+  }
+  // 组件数据始终允许勾选/取消；匹配不到依赖时由后端记录“未匹配”并在审批页提示，
+  // 不能因为快照缺失就把复选框禁用或强制取消。
+  if (compBox) {
+    compBox.disabled = false;
+  }
+}
+
+function markOwnedPermissions(form, own) {
+  if (!form) return;
+  form.querySelectorAll('input[name="permissions"]').forEach(function(cb) {
+    var label = cb.closest('label');
+    if (!label) return;
+    var old = label.querySelector('.perm-owned');
+    if (old) old.remove();
+    if (own && own[cb.value]) {
+      var badge = document.createElement('span');
+      badge.className = 'perm-owned';
+      badge.textContent = '已有';
+      label.appendChild(badge);
+    }
+  });
+}
+
+function checkPermissionStatus(form) {
+  if (!form) return;
+  var hint = form.querySelector('.perm-status-hint');
+  if (!hint) return;
+  var rtype = form.querySelector('input[name="resource_type"]');
+  var rid = form.querySelector('input[name="resource_id"]');
+  var entry = form.querySelector('input[name="entry_id"]');
+  var rpath = form.querySelector('input[name="resource_path"]');
+  var type = rtype ? rtype.value : '';
+  if (!type) { hint.textContent = ''; return; }
+  var actions = Array.prototype.slice.call(
+    form.querySelectorAll('input[name="permissions"]:checked'))
+    .map(function(x) { return x.value; }).join(',');
+  var seq = ++_permHintSeq;
+  var params = new URLSearchParams({
+    resource_type: type,
+    resource_id: rid ? rid.value : '',
+    entry_id: entry ? entry.value : '',
+    resource_path: rpath ? rpath.value : '',
+    actions: actions
+  });
+  hint.textContent = '正在检查已有权限…';
+  markOwnedPermissions(form, null);
+  fetch('/api/permission-status?' + params.toString(), {credentials: 'same-origin'})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (seq !== _permHintSeq) return;
+      renderDashboardDeps(form, data);
+      if (!data || !data.known) {
+        markOwnedPermissions(form, null);
+        hint.textContent = '';
+        return;
+      }
+      markOwnedPermissions(form, data.own || {});
+      var owned = [];
+      Object.keys(data.own || {}).forEach(function(k) {
+        if (data.own[k]) owned.push(PERM_LABELS[k] || k);
+      });
+      if (data.folder_counts) {
+        var total = data.folder_total || 0;
+        ['view', 'export', 'edit', 'empower'].forEach(function(k) {
+          var n = data.folder_counts[k] || 0;
+          if (n > 0 && n < total) {
+            owned.push('文件夹下已有' + (PERM_LABELS[k] || k) + ' ' + n + '/' + total + ' 个');
+          }
+        });
+      }
+      if (!owned.length) { hint.textContent = ''; return; }
+      hint.textContent = '该用户已拥有：' + owned.join('、')
+        + '（已有权限不会重复授权）';
+    })
+    .catch(function() { if (seq === _permHintSeq) hint.textContent = ''; });
+}
+
+function toggleTree(id) {
+  var box = document.getElementById(id);
+  if (!box) return;
+  document.querySelectorAll('.tree-select.open').forEach(x => { if (x !== box) x.classList.remove('open'); });
+  box.classList.toggle('open');
+}
+function selectTreeNode(box, node) {
+  var id = node.dataset.id || '';
+  var entry = node.dataset.entryId || '';
+  var type = node.dataset.type || '';
+  var name = node.dataset.name || '';
+  var isDashboardFolder = type === 'dashboard_folder';
+  if (!id && !entry && !isDashboardFolder) return;
+  var form = box.closest('form');
+  var rid = form ? form.querySelector('input[name="resource_id"]') : null;
+  var rentry = form ? form.querySelector('input[name="entry_id"]') : null;
+  var rtype = form ? form.querySelector('input[name="resource_type"]') : null;
+  var rname = form ? form.querySelector('input[name="resource_name"]') : null;
+  var rpath = form ? form.querySelector('input[name="resource_path"]') : null;
+  if (isDashboardFolder) {
+    // 仪表板文件夹：清空单个仪表板 ID，提交后由后端展开成目录下全部仪表板
+    if (rid) rid.value = '';
+    if (rentry) rentry.value = '';
+    if (rtype) rtype.value = 'dashboard_folder';
+    if (rname) rname.value = name;
+    if (rpath) rpath.value = node.dataset.path || '';
+  } else {
+    if (rid) rid.value = id;
+    if (rentry) rentry.value = entry;
+    if (rtype) rtype.value = type;
+    if (rname) rname.value = name;
+    if (rpath) rpath.value = node.dataset.path || '';
+  }
+  if (isDashboardFolder) {
+    var count = node.dataset.count || '';
+    box.querySelector('.tree-trigger').textContent =
+      name + '（文件夹，' + (count || '?') + ' 个仪表板）';
+    var hint = document.getElementById('dashboard-folder-hint');
+    if (hint) hint.textContent = '已选择文件夹：提交后将对该文件夹下 '
+      + (count || '全部') + ' 个仪表板一起申请权限。';
+  } else {
+    box.querySelector('.tree-trigger').textContent =
+      name + '（' + (TYPE_LABELS[type] || type) + '）';
+    var dashHint = document.getElementById('dashboard-folder-hint');
+    if (dashHint) dashHint.textContent = '';
+  }
+  if (box.id === 'dashboard-select') {
+    var depsHint = document.getElementById('dashboard-deps-hint');
+    if (depsHint) depsHint.textContent = '正在匹配依赖数据集…';
+  }
+  box.classList.remove('open');
+  checkPermissionStatus(form);
+  if (box.id === 'public-select') {
+    var rowEnabled = document.getElementById('row-enabled');
+    if (type === 'table') {
+      rowEnabled.disabled = false;
+      loadRowValues(id);
+    } else {
+      rowEnabled.checked = false;
+      rowEnabled.disabled = true;
+      document.getElementById('row-box').style.display = 'none';
+    }
+  }
+}
+document.querySelectorAll('.tree-select').forEach(function(box) {
+  box.querySelector('.tree-panel').addEventListener('click', function(e) {
+    var node = e.target.closest('.tree-leaf, .tree-pick');
+    if (!node) return;
+    e.preventDefault();
+    e.stopPropagation();
+    selectTreeNode(box, node);
+  });
+});
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.tree-select')) {
+    document.querySelectorAll('.tree-select.open').forEach(x => x.classList.remove('open'));
+  }
+});
+var rowCheckbox = document.getElementById('row-enabled');
+if (rowCheckbox) rowCheckbox.disabled = true;
+function toggleRow() {
+  var enabled = document.getElementById('row-enabled').checked;
+  document.getElementById('row-box').style.display = enabled ? '' : 'none';
+}
+var TABLE_FIELDS = [];
+var ROW_ENUMS = {};
+var FIELD_VALUES = {};
+var CURRENT_TABLE = '';
+function loadRowValues(table) {
+  CURRENT_TABLE = table || '';
+  TABLE_FIELDS = [];
+  ROW_ENUMS = {};
+  FIELD_VALUES = {};
+  var field = document.getElementById('row-field');
+  var hint = document.getElementById('row-hint');
+  field.innerHTML = '<option value="">读取中…</option>';
+  if (field._refresh) field._refresh();
+  Promise.all([
+    fetch('/api/table-fields?table=' + encodeURIComponent(table)).then(r => r.json()),
+    fetch('/api/row-values?table=' + encodeURIComponent(table)).then(r => r.json())
+  ]).then(function(results) {
+    var tableData = results[0] || {};
+    var enumData = results[1] || {};
+    TABLE_FIELDS = tableData.fields || [];
+    (enumData.fields || []).forEach(function(item) {
+      ROW_ENUMS[item.field_id] = item;
+    });
+    if (!TABLE_FIELDS.length) {
+      // 字段接口失败时退回“有枚举的字段”，至少不阻断申请
+      TABLE_FIELDS = (enumData.fields || []).map(function(item) {
+        return {field_id: item.field_id, name: item.name};
+      });
+    }
+    if (!TABLE_FIELDS.length) {
+      field.innerHTML = '<option value="">未读取到字段列表</option>';
+      hint.innerText = '未读取到该数据集字段，请稍后重试或联系管理员刷新目录。';
+      if (field._refresh) field._refresh();
+      return;
+    }
+    field.innerHTML = '<option value="">请选择行权限字段</option>'
+      + TABLE_FIELDS.map(function(f) {
+        return '<option value="' + f.field_id + '">' + (f.name || f.field_id) + '</option>';
+      }).join('');
+    if (field._refresh) field._refresh();
+    hint.innerText = '选字段后会自动读取数据去重值；没有枚举/数据源不可用时可直接输入值。';
+    renderValues();
+  }).catch(function() {
+    field.innerHTML = '<option value="">读取失败</option>';
+    hint.innerText = '读取字段/枚举失败，请稍后重试。';
+    if (field._refresh) field._refresh();
+  });
+}
+function renderValueEditor(field, values) {
+  var box = document.getElementById('row-values');
+  box.innerHTML = '';
+  box.className = 'multi-select-host';
+  if (values && values.length && window.createMultiSelect) {
+    var found = ROW_ENUMS[field] || {name: field};
+    var name = '';
+    TABLE_FIELDS.forEach(function(item) {
+      if (item.field_id === field) name = item.name || item.field_id;
+    });
+    window.createMultiSelect(box, values, [], 'row_values',
+      '搜索并选择' + (name || found.name || '') + '值…');
+    return;
+  }
+  if (window.createTagInput) {
+    var fieldName = field;
+    TABLE_FIELDS.forEach(function(item) {
+      if (item.field_id === field) fieldName = item.name || item.field_id;
+    });
+    window.createTagInput(box, [], 'row_values',
+      '输入' + fieldName + '值，回车添加');
+  }
+}
+function renderValues() {
+  var field = document.getElementById('row-field').value;
+  var box = document.getElementById('row-values');
+  box.innerHTML = '';
+  box.className = 'multi-select-host';
+  if (!field) return;
+  if (FIELD_VALUES[field] && FIELD_VALUES[field].length) {
+    renderValueEditor(field, FIELD_VALUES[field]);
+    return;
+  }
+  var enumField = ROW_ENUMS[field];
+  if (enumField && (enumField.values || []).length) {
+    renderValueEditor(field, enumField.values);
+  } else {
+    box.innerHTML = '<span class="muted">正在读取该字段的去重值…</span>';
+  }
+  fetch('/api/field-values?table=' + encodeURIComponent(CURRENT_TABLE)
+        + '&field=' + encodeURIComponent(field))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (document.getElementById('row-field').value !== field) return;
+      var values = (data && data.values) || [];
+      if (values.length) {
+        FIELD_VALUES[field] = values;
+        renderValueEditor(field, values);
+        return;
+      }
+      if (!enumField || !(enumField.values || []).length) {
+        renderValueEditor(field, []);
+      }
+    })
+    .catch(function() {
+      if (document.getElementById('row-field').value !== field) return;
+      if (!enumField || !(enumField.values || []).length) {
+        renderValueEditor(field, []);
+      }
+    });
+}
+
+/* ---------- 资源下拉：标注用户已有权限 ---------- */
+function applyPermissionBadges(category, items) {
+  var selector = category === 'dashboard' ? '#dashboard-select' : '#public-select';
+  var nodes = document.querySelectorAll(selector + ' .tree-leaf, '
+                                        + selector + ' .tree-pick');
+  nodes.forEach(function(node) {
+    var key = category === 'dashboard' ? (node.dataset.entryId || '')
+                                       : (node.dataset.id || '');
+    var info = key ? items[key] : null;
+    if (!info || !info.labels || !info.labels.length) return;
+    if (node.querySelector('.tree-owned')) return;
+    var badge = document.createElement('span');
+    badge.className = 'tree-owned';
+    badge.textContent = '已有：' + info.labels.join('、');
+    node.appendChild(badge);
+  });
+}
+function loadPermissionMap(category) {
+  fetch('/api/permission-map?category=' + encodeURIComponent(category))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      applyPermissionBadges(category, (data && data.items) || {});
+    })
+    .catch(function() {});
+}
+loadPermissionMap('dashboard');
+loadPermissionMap('public_data');
+
+/* ---------- 树搜索 ---------- */
+function filterTree(panel, q) {
+  if (!panel) return;
+  q = (q || '').trim().toLowerCase();
+  var lis = panel.querySelectorAll('li');
+  if (!q) {
+    lis.forEach(function(li) { li.style.display = ''; });
+    panel.querySelectorAll('details').forEach(function(d) { d.open = false; });
+    return;
+  }
+  lis.forEach(function(li) {
+    var text = li.textContent.toLowerCase();
+    li.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+  });
+  panel.querySelectorAll('details').forEach(function(d) { d.open = true; });
+}
+
+/* ---------- 通用可搜索下拉框 ---------- */
+function initSearchSelect(select) {
+  if (!select || select.dataset.searchReady === '1') return;
+  select.dataset.searchReady = '1';
+  var multi = !!select.multiple;
+  var wrap = document.createElement('div');
+  wrap.className = 'search-select';
+  var trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'search-select-trigger';
+  trigger.textContent = '请选择';
+  var panel = document.createElement('div');
+  panel.className = 'search-select-panel';
+  panel.style.display = 'none';
+  var search = document.createElement('input');
+  search.type = 'search';
+  search.className = 'search-select-input';
+  search.placeholder = '输入关键字搜索…';
+  var list = document.createElement('div');
+  list.className = 'search-select-list';
+  panel.appendChild(search);
+  panel.appendChild(list);
+  wrap.appendChild(trigger);
+  wrap.appendChild(panel);
+  select.parentNode.insertBefore(wrap, select);
+  select.classList.add('search-select-native');
+  select.required = false;
+  var isOpen = false;
+
+  function syncTrigger() {
+    var texts = [];
+    Array.prototype.forEach.call(select.options, function(o) {
+      if (o.selected && o.value) texts.push(o.textContent);
+    });
+    trigger.textContent = texts.length ? texts.join('、') : '请选择';
+  }
+  function renderList() {
+    var q = search.value.trim().toLowerCase();
+    list.innerHTML = '';
+    Array.prototype.forEach.call(select.options, function(o) {
+      var text = o.textContent || '';
+      if (q && text.toLowerCase().indexOf(q) < 0
+          && String(o.value).toLowerCase().indexOf(q) < 0) return;
+      var label = document.createElement('label');
+      label.className = 'search-select-option';
+      var cb = document.createElement('input');
+      cb.type = multi ? 'checkbox' : 'radio';
+      cb.checked = !!o.selected;
+      cb.addEventListener('change', function() {
+        if (multi) {
+          o.selected = cb.checked;
+        } else {
+          Array.prototype.forEach.call(select.options, function(x) { x.selected = false; });
+          o.selected = true;
+        }
+        syncTrigger();
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        if (!multi) { isOpen = false; panel.style.display = 'none'; }
+      });
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(' ' + text));
+      list.appendChild(label);
+    });
+    if (!list.children.length) {
+      var empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = '没有匹配项';
+      list.appendChild(empty);
+    }
+  }
+  trigger.addEventListener('click', function() {
+    isOpen = !isOpen;
+    panel.style.display = isOpen ? '' : 'none';
+    if (isOpen) { search.value = ''; renderList(); search.focus(); }
+  });
+  search.addEventListener('input', renderList);
+  document.addEventListener('click', function(e) {
+    if (!wrap.contains(e.target)) { isOpen = false; panel.style.display = 'none'; }
+  });
+  select._refresh = function() { syncTrigger(); if (isOpen) renderList(); };
+  syncTrigger();
+}
+document.querySelectorAll('select').forEach(initSearchSelect);
+
+/* ---------- 角色/部门申请选项 ---------- */
+function fillMembershipSelect(id, items) {
+  var select = document.getElementById(id);
+  if (!select) return;
+  select.innerHTML = '';
+  (items || []).forEach(function(it) {
+    var opt = document.createElement('option');
+    opt.value = it.value;
+    opt.textContent = it.label;
+    select.appendChild(opt);
+  });
+  if (select._refresh) select._refresh();
+}
+
+function markMembershipOwned(selectId, owned, isDept) {
+  var select = document.getElementById(selectId);
+  if (!select) return 0;
+  var ownedSet = {};
+  (owned || []).forEach(function(v) { ownedSet[String(v)] = true; });
+  var count = 0;
+  Array.prototype.forEach.call(select.options, function(opt) {
+    var label = (opt.textContent || '').replace('（已加入）', '');
+    if (ownedSet[opt.value] || ownedSet[label]) {
+      opt.disabled = true;
+      opt.textContent = label + '（已加入）';
+      count++;
+    }
+  });
+  return count;
+}
+
+function loadMembershipOptions() {
+  var status = document.getElementById('membership-status');
+  fetch('/api/membership-options')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      fillMembershipSelect('role-targets', (data.roles || []).map(function(role) {
+        return {value: role.name, label: role.name};
+      }));
+      fillMembershipSelect('department-targets', (data.departments || []).map(function(dept) {
+        return {value: JSON.stringify(dept.path), label: dept.full_path};
+      }));
+      if (status) {
+        var errors = data.errors || [];
+        if (errors.length) {
+          status.textContent = '角色/部门列表读取失败：' + errors.join('；');
+        } else {
+          status.textContent = '已读取 ' + (data.roles || []).length + ' 个角色、'
+            + (data.departments || []).length + ' 个部门。';
+        }
+      }
+      // 本地快照里已有角色/部门直接标注并禁用，避免重复申请
+      fetch('/api/membership-status')
+        .then(function(r) { return r.json(); })
+        .then(function(st) {
+          if (!st || !st.known) return;
+          var nRole = markMembershipOwned('role-targets', st.roles || [], false);
+          var nDept = markMembershipOwned('department-targets', st.departments || [], true);
+          if (status && (nRole || nDept)) {
+            status.textContent += ' 你当前已加入 ' + nRole + ' 个角色、'
+              + nDept + ' 个部门（已标注，无需重复申请）。';
+          }
+        })
+        .catch(function() {});
+    })
+    .catch(function() {
+      if (status) status.textContent = '角色/部门列表读取失败，请刷新页面重试。';
+    });
+}
+
+if (document.getElementById('role-targets') || document.getElementById('department-targets')) {
+  loadMembershipOptions();
+}
+</script>
+{% endblock %}

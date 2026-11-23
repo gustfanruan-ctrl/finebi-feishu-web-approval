@@ -1,0 +1,16 @@
+[Unit]
+Description=FineBI data/dashboard catalog and role/department snapshot refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# 与 Web 服务同一运行用户，保证快照文件可读；不要用 root 跑刷新
+User=finebi
+Group=finebi
+# 按实际部署路径修改；.env 也放在 WorkingDirectory 下
+WorkingDirectory=/opt/finebi-feishu
+Environment=PYTHONPATH=/opt/finebi-feishu/src
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/finebi-feishu/.venv/bin/python -m executor.cli refresh-directory
+# 查看日志：journalctl -u finebi-directory-refresh.service -n 100

@@ -1,0 +1,521 @@
+{% extends "base.html" %}
+{% block title %}申请详情 - FineBI 数据权限申请{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>申请 {{ req.payload.request_no or req.id }}</h1>
+  {% if message %}<div class="card" style="color:var(--green);">{{ message }}</div>{% endif %}
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <p>
+    <span class="badge {{ req.status }}">{{ status_labels.get(req.status, req.status) }}</span>
+    <span class="muted">{{ category_labels.get(req.category, req.category) }} · 风险：{{ req.risk }} · 申请人：{{ req.applicant.name if req.applicant else req.applicant_id }} · {{ req.created_at[:16]|replace('T', ' ') }}</span>
+  </p>
+  <table>
+    {% if req.category == 'membership' %}
+    <tr><th style="width:140px;">资源</th><td>{{ '角色' if req.payload.membership_type == 'role' else '部门' }} / {{ req.payload.resource_name|replace('角色：', '')|replace('部门：', '') }}</td></tr>
+    {% else %}
+    <tr><th style="width:140px;">资源</th><td>{{ resource_labels.get(req.payload.resource_type, req.payload.resource_type) }} / {{ req.payload.resource_name or req.payload.resource_id }}{% if req.payload.resource_path or req.payload.resource_id %}<br><span class="muted">{{ req.payload.resource_path or req.payload.resource_id }}</span>{% endif %}</td></tr>
+    <tr><th>权限项</th><td>{% for p in (req.payload.permissions or req.payload.actions or []) %}{{ action_labels.get(p, p) }}{% if not loop.last %}、{% endif %}{% endfor %}</td></tr>
+    {% endif %}
+    {% if req.payload.component_datasets %}
+    <tr><th>组件数据覆盖数据集</th><td>{% for d in req.payload.component_datasets %}{{ d.name or d.resource_id }}{% if not loop.last %}、{% endif %}{% endfor %}</td></tr>
+    {% elif req.payload.component_skipped_reason %}
+    <tr><th>组件数据</th><td class="muted">{{ req.payload.component_skipped_reason }}</td></tr>
+    {% endif %}
+    {% if req.payload.data_scope and req.payload.data_scope.rules %}
+    <tr><th>行权限（申请单）</th><td>{% for rule in req.payload.data_scope.rules %}{{ rule.fieldId }} {{ '不属于' if rule.type == 'strNotIn' else '属于' }} {{ rule.filterValue|join('、') }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>
+    {% endif %}
+    {% if req.payload.field_ids %}
+    <tr><th>列权限（申请单）</th><td>{{ req.payload.field_ids|length }} 个字段{% if selected_field_names %}：{{ selected_field_names|join('、') }}{% endif %}</td></tr>
+    {% endif %}
+    {% if req.payload.scope_configured_by %}
+    <tr><th>行/列配置人</th><td><span class="muted">{{ req.payload.scope_configured_by }} · {{ req.payload.scope_updated_at }}</span></td></tr>
+    {% endif %}
+    <tr><th>申请周期</th><td>{% if req.payload.period_type == 'long' %}长期{% else %}临时（{{ req.payload.days }} 天）{% endif %}</td></tr>
+    <tr><th>当前审批人</th><td>{{ req.current_approver.name if req.current_approver else '-' }}</td></tr>
+    <tr><th>理由</th><td>{{ req.payload.reason or '-' }}</td></tr>
+    {% if req.result %}<tr><th>执行结果</th><td><pre style="white-space:pre-wrap;margin:0;">{{ req.result }}</pre></td></tr>{% endif %}
+  </table>
+</div>
+
+{% if req.category == 'dashboard' and req.payload.component_datasets %}
+{% set component_scopes = req.payload.component_scopes or {} %}
+<div class="card" id="component-scope-card">
+  <h2>连带组件数据：行/列权限（可选，审批人补充）</h2>
+  <p class="muted">该申请连带了 {{ req.payload.component_datasets|length }} 个数据集的组件数据。只有公共数据目录中的数据集才需要配置行/列权限；自助数据集无需配置。</p>
+  {% if component_other_tables %}
+  <p class="muted">自助数据集（无需配置行/列权限）：
+    {% for d in component_other_tables %}{{ d.name or d.resource_id }}{% if not loop.last %}、{% endif %}{% endfor %}
+  </p>
+  {% endif %}
+  {% if can_configure_component_scope %}
+  <form method="post" action="/requests/{{ req.id }}/scope" id="component-scope-form">
+    <label>选择公共数据集</label>
+    <select name="scope_table_id" id="component-table-select">
+      {% for d in component_scope_tables %}
+      <option value="{{ d.resource_id }}">{{ d.name or d.resource_id }}{% if (component_scopes.get(d.resource_id) or {}).get('row_enabled') or (component_scopes.get(d.resource_id) or {}).get('field_ids') %}（已配置）{% endif %}</option>
+      {% endfor %}
+    </select>
+    <p class="muted" id="component-perm-alert">正在检测该数据集的行权限配置…</p>
+    <label><input type="checkbox" name="row_enabled" id="component-row-enabled"> 为申请人配置行权限（在组件数据权限通过后写入）</label>
+    <div id="component-row-box" style="margin-left:18px;display:none;">
+      <label>行权限字段</label>
+      <select name="row_field" id="component-row-field"><option value="">读取中…</option></select>
+      <label>条件</label>
+      <select name="row_operator" id="component-row-operator">
+        <option value="strIn">属于</option>
+        <option value="strNotIn">不属于</option>
+      </select>
+      <label>值（有枚举可搜索多选；无枚举可手动输入）</label>
+      <div id="component-row-values" class="multi-select-host"><span class="muted">请先选择行权限字段</span></div>
+    </div>
+    <label style="margin-top:12px;">列权限（可多选；不选则不补充）</label>
+    <div class="checkbox-list" id="component-fields"><span class="muted">读取中…</span></div>
+    <p><button type="submit">保存该数据集行/列权限</button> <span class="muted">保存后再点下方“通过”；可切换数据集逐个配置</span></p>
+  </form>
+  <script>
+  (function() {
+    var requestId = {{ req.id|tojson }};
+    var componentTables = {{ (component_scope_tables or [])|tojson }};
+    var componentScopes = {{ (req.payload.component_scopes or {})|tojson }};
+    var select = document.getElementById('component-table-select');
+    var alertEl = document.getElementById('component-perm-alert');
+    var enabled = document.getElementById('component-row-enabled');
+    var rowBox = document.getElementById('component-row-box');
+    var fieldSel = document.getElementById('component-row-field');
+    var operatorSel = document.getElementById('component-row-operator');
+    var valueBox = document.getElementById('component-row-values');
+    var fieldsBox = document.getElementById('component-fields');
+    if (!select || !alertEl) return;
+    var allFields = [];
+    var enumMap = {};
+    var fieldValues = {};
+    var scope = {};
+    var selectedField = '';
+    var selectedValues = [];
+
+    function esc(text) {
+      return String(text == null ? '' : text).replace(/[&<>"']/g, function(ch) {
+        return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch];
+      });
+    }
+    function toggleRow() {
+      rowBox.style.display = enabled.checked ? '' : 'none';
+    }
+    function renderValues() {
+      valueBox.innerHTML = '';
+      valueBox.className = 'multi-select-host';
+      var fieldId = fieldSel.value;
+      if (!fieldId) return;
+      var selected = fieldId === selectedField ? selectedValues : [];
+      var enumField = enumMap[fieldId];
+      if (enumField && (enumField.values || []).length && window.createMultiSelect) {
+        window.createMultiSelect(valueBox, enumField.values, selected, 'row_values',
+          '搜索并选择' + (enumField.name || '') + '值…');
+        return;
+      }
+      if (fieldValues[fieldId] && fieldValues[fieldId].length
+          && window.createMultiSelect) {
+        window.createMultiSelect(valueBox, fieldValues[fieldId], selected,
+          'row_values', '搜索并选择值…');
+        return;
+      }
+      if (window.createTagInput) {
+        var name = fieldId;
+        allFields.forEach(function(item) {
+          if (item.field_id === fieldId) name = item.name || fieldId;
+        });
+        window.createTagInput(valueBox, selected, 'row_values',
+          '输入' + name + '值，回车添加');
+      }
+    }
+    function loadFieldValues(fieldId) {
+      fetch('/api/field-values?table=' + encodeURIComponent(select.value)
+            + '&field=' + encodeURIComponent(fieldId)
+            + '&request_id=' + encodeURIComponent(requestId))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (fieldSel.value !== fieldId) return;
+          if (data && data.values && data.values.length) {
+            fieldValues[fieldId] = data.values;
+            renderValues();
+          }
+        })
+        .catch(function() {});
+    }
+    function loadScope() {
+      var tableId = select.value;
+      scope = componentScopes[tableId] || {};
+      selectedField = ((scope.data_scope || {}).rules || [])[0]
+        ? ((scope.data_scope || {}).rules)[0].fieldId : '';
+      selectedValues = (((scope.data_scope || {}).rules || [])[0] || {}).filterValue || [];
+      enabled.checked = !!scope.row_enabled;
+      toggleRow();
+      alertEl.textContent = '正在检测该数据集的行权限配置…';
+      fieldsBox.innerHTML = '<span class="muted">读取中…</span>';
+      fieldSel.innerHTML = '<option value="">读取中…</option>';
+      valueBox.innerHTML = '<span class="muted">请先选择行权限字段</span>';
+      allFields = [];
+      enumMap = {};
+      fieldValues = {};
+      Promise.all([
+        fetch('/api/row-permission-status?request_id=' + encodeURIComponent(requestId)
+              + '&table_id=' + encodeURIComponent(tableId)).then(function(r) { return r.json(); }),
+        fetch('/api/table-fields?request_id=' + encodeURIComponent(requestId)
+              + '&table_id=' + encodeURIComponent(tableId)).then(function(r) { return r.json(); }),
+        fetch('/api/row-values?table=' + encodeURIComponent(tableId)).then(function(r) { return r.json(); })
+      ]).then(function(results) {
+        var status = results[0] || {};
+        var tableData = results[1] || {};
+        var enumData = results[2] || {};
+        if (status && status.known && status.configured) {
+          alertEl.textContent = '该数据集已配置行权限（角色 ' + ((status.counts || {}).role || 0)
+            + ' 条、部门/岗位 ' + ((status.counts || {}).department || 0)
+            + ' 条、用户 ' + ((status.counts || {}).user || 0)
+            + ' 条），建议补充；不补充申请人可看到全量。';
+          alertEl.style.color = 'var(--red, #b42318)';
+        } else if (status && status.known) {
+          alertEl.textContent = '该数据集未检测到行权限规则，可不配置。';
+          alertEl.style.color = '';
+        } else {
+          alertEl.textContent = '无法读取该数据集行权限状态，可人工确认。';
+          alertEl.style.color = '';
+        }
+        allFields = tableData.fields || [];
+        (enumData.fields || []).forEach(function(item) {
+          enumMap[item.field_id] = item;
+        });
+        fieldSel.innerHTML = '<option value="">请选择行权限字段</option>';
+        allFields.forEach(function(field) {
+          var opt = document.createElement('option');
+          opt.value = field.field_id;
+          opt.textContent = field.name || field.field_id;
+          if (field.field_id === selectedField) opt.selected = true;
+          fieldSel.appendChild(opt);
+        });
+        fieldsBox.innerHTML = '';
+        if (!allFields.length) {
+          fieldsBox.innerHTML = '<span class="muted">未读取到字段列表</span>';
+        }
+        allFields.forEach(function(field) {
+          var label = document.createElement('label');
+          var cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.name = 'field_ids';
+          cb.value = field.field_id;
+          if ((scope.field_ids || []).indexOf(field.field_id) >= 0) cb.checked = true;
+          label.appendChild(cb);
+          label.appendChild(document.createTextNode(' ' + (field.name || field.field_id)));
+          fieldsBox.appendChild(label);
+        });
+        operatorSel.value = ((scope.data_scope || {}).rules || [])[0]
+          ? ((scope.data_scope || {}).rules)[0].type : 'strIn';
+        renderValues();
+        if (fieldSel.value) loadFieldValues(fieldSel.value);
+      }).catch(function() {
+        alertEl.textContent = '读取数据集信息失败，请稍后重试。';
+      });
+    }
+    enabled.addEventListener('change', toggleRow);
+    fieldSel.addEventListener('change', renderValues);
+    select.addEventListener('change', loadScope);
+    loadScope();
+  })();
+  </script>
+  {% else %}
+  <div class="muted">
+    {% for d in component_scope_tables %}
+    {% set sc = component_scopes.get(d.resource_id) or {} %}
+    <p>{{ d.name or d.resource_id }}：
+      {% if sc.get('row_enabled') %}已配置行权限{% endif %}
+      {% if sc.get('field_ids') %}已配置 {{ sc.get('field_ids')|length }} 个列字段{% endif %}
+      {% if not sc.get('row_enabled') and not sc.get('field_ids') %}未补充行/列权限{% endif %}
+    </p>
+    {% else %}
+    <p>连带数据集中没有公共数据集，均为自助数据集，无需配置行/列权限。</p>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if req.category == 'membership' %}
+<div class="card" id="entity-perm-card">
+  <h2>该角色/部门当前拥有的权限（辅助审批）</h2>
+  <div id="entity-perm-body" class="muted">正在读取该实体当前拥有的权限…</div>
+  <p class="muted">以上为该实体当前已配置的权限摘要，仅供审批参考；加入该实体后会自动继承这些权限。</p>
+</div>
+<script>
+(function() {
+  var body = document.getElementById('entity-perm-body');
+  if (!body) return;
+  var requestId = {{ req.id|tojson }};
+  function esc(text) {
+    return String(text == null ? '' : text).replace(/[&<>"']/g, function(ch) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch];
+    });
+  }
+  function addRow(rows, label, value) {
+    if (value === '' || value == null) return;
+    rows.push('<tr><th style="width:150px;">' + esc(label) + '</th><td>' + value + '</td></tr>');
+  }
+  fetch('/api/entity-permissions?request_id=' + encodeURIComponent(requestId))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data || !data.known || !data.summary) {
+        body.textContent = '未能读取权限摘要：' + ((data && data.error) || '未知原因')
+          + '（不影响审批，可人工到 FineBI 权限页确认）';
+        return;
+      }
+      var sm = data.summary;
+      var kind = data.entity_type === 'role' ? '角色' : '部门';
+      var rows = [];
+      addRow(rows, '实体', esc(data.entity) + '（' + kind + '）');
+      addRow(rows, '数据权限', '文件夹 ' + (sm.folders.count || 0) + ' 个；数据集 '
+        + (sm.tables.count || 0) + ' 个；组件数据 ' + (sm.tables.component || 0)
+        + ' 个；行权限 ' + (sm.rows.count || 0) + ' 个数据集');
+      if (sm.tables.names && sm.tables.names.length) {
+        addRow(rows, '数据集范围', '<span class="muted">' + esc(sm.tables.names.join('、')) + '</span>');
+      }
+      if (sm.rows.names && sm.rows.names.length) {
+        addRow(rows, '行权限数据集', '<span class="muted">' + esc(sm.rows.names.join('、')) + '</span>');
+      }
+      var dashText = '可查看看板 ' + (sm.dashboards.view || 0) + ' 个；目录项 '
+        + (sm.entries.view || 0) + ' 个';
+      if (sm.dashboards.available === false) {
+        dashText += '（仪表板模板认证未开启，看板模板权限未统计）';
+      }
+      addRow(rows, '目录/看板', dashText);
+      if (sm.dashboards.names && sm.dashboards.names.length) {
+        addRow(rows, '看板范围', '<span class="muted">' + esc(sm.dashboards.names.join('、')) + '</span>');
+      }
+      addRow(rows, '统计时间', '<span class="muted">' + esc(data.checked_at || '') + '</span>');
+      body.className = '';
+      body.innerHTML = '<table>' + rows.join('') + '</table>';
+    })
+    .catch(function() {
+      body.textContent = '未能读取权限摘要（不影响审批，可人工到 FineBI 权限页确认）';
+    });
+})();
+</script>
+{% endif %}
+
+{% if can_configure_scope %}
+<div class="card">
+  <h2>行/列权限（可选，审批人补充）</h2>
+  <p class="muted" id="row-perm-alert">正在检测该数据集的行权限配置…</p>
+  <p class="muted">说明：先授数据权限、再授行/列权限；不补充也可直接审批。若该数据集已配置行权限而本次不补充，申请人将看到全量数据。</p>
+  <form method="post" action="/requests/{{ req.id }}/scope" id="scope-form">
+    <label><input type="checkbox" name="row_enabled" id="scope-row-enabled" {% if req.payload.row_enabled %}checked{% endif %}> 为申请人配置行权限（行权限在数据权限通过后写入）</label>
+    <div id="scope-row-box" style="margin-left:18px;{% if not req.payload.row_enabled %}display:none;{% endif %}">
+      <label>行权限字段</label>
+      <select name="row_field" id="scope-row-field"><option value="">读取中…</option></select>
+      <label>条件</label>
+      <select name="row_operator" id="scope-row-operator">
+        <option value="strIn">属于</option>
+        <option value="strNotIn">不属于</option>
+      </select>
+      <label>值（有枚举可搜索多选；无枚举可手动输入）</label>
+      <div id="scope-row-values" class="multi-select-host"><span class="muted">请先选择行权限字段</span></div>
+    </div>
+    <label style="margin-top:12px;">列权限（可多选；不选则不补充）</label>
+    <div class="checkbox-list" id="scope-fields">
+      {% for f in table_fields %}
+      <label><input type="checkbox" name="field_ids" value="{{ f.field_id }}" {% if f.field_id in (req.payload.field_ids or []) %}checked{% endif %}> {{ f.name }}</label>
+      {% else %}
+      <span class="muted">未读取到字段列表（可能目录快照未刷新）</span>
+      {% endfor %}
+    </div>
+    <p><button type="submit">保存行/列权限</button> <span class="muted">保存后再点下方“通过”</span></p>
+  </form>
+</div>
+<script>
+(function() {
+  var requestId = {{ req.id|tojson }};
+  var tableId = {{ (req.payload.resource_id or '')|tojson }};
+  {% set scope_rules = (req.payload.data_scope or {}).get('rules') or [] %}
+  var existingField = {{ (scope_rules[0].get('fieldId') if scope_rules else '')|tojson }};
+  var existingValues = {{ (scope_rules[0].get('filterValue') if scope_rules else [])|tojson }};
+  var existingOperator = {{ (scope_rules[0].get('type') if scope_rules else 'strIn')|tojson }};
+  var allFields = {{ (table_fields or [])|tojson }};
+  var enumMap = {};
+  var fieldValues = {};
+  var alertEl = document.getElementById('row-perm-alert');
+  var enabled = document.getElementById('scope-row-enabled');
+  var box = document.getElementById('scope-row-box');
+  var fieldSel = document.getElementById('scope-row-field');
+  var operatorSel = document.getElementById('scope-row-operator');
+  var valueBox = document.getElementById('scope-row-values');
+  if (!alertEl) return;
+  if (operatorSel) operatorSel.value = existingOperator || 'strIn';
+
+  if (enabled) {
+    enabled.addEventListener('change', function() {
+      box.style.display = enabled.checked ? '' : 'none';
+    });
+  }
+
+  fetch('/api/row-permission-status?request_id=' + encodeURIComponent(requestId))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data || !data.known) {
+        alertEl.textContent = '无法读取该数据集行权限状态，请人工到 FineBI 权限页确认。';
+        return;
+      }
+      if (!data.configured) {
+        alertEl.textContent = '该数据集未检测到行权限规则，可不配置行权限。';
+        return;
+      }
+      var parts = [];
+      if (data.counts.role) parts.push('角色 ' + data.counts.role + ' 条');
+      if (data.counts.department) parts.push('部门/岗位 ' + data.counts.department + ' 条');
+      if (data.counts.user) parts.push('用户 ' + data.counts.user + ' 条');
+      var subjects = [];
+      (data.subjects.roles || []).forEach(function(x) { subjects.push(x); });
+      (data.subjects.departments || []).forEach(function(x) { subjects.push(x); });
+      var text = '该数据集已配置行权限：' + (parts.join('、') || '已配置');
+      if (subjects.length) text += '（' + subjects.slice(0, 6).join('、') + '）';
+      text += '。建议为申请人补充行权限后再通过；不补充则申请人可看到全量数据。';
+      if (data.applicant_has_rule) text += ' 申请人已有用户级行权限。';
+      alertEl.textContent = text;
+      alertEl.style.color = 'var(--red, #b42318)';
+    })
+    .catch(function() {
+      alertEl.textContent = '无法读取该数据集行权限状态，请人工到 FineBI 权限页确认。';
+    });
+
+  Promise.all([
+    fetch('/api/table-fields?request_id=' + encodeURIComponent(requestId))
+      .then(function(r) { return r.json(); })
+      .catch(function() { return {fields: []}; }),
+    fetch('/api/row-values?table=' + encodeURIComponent(tableId))
+      .then(function(r) { return r.json(); })
+      .catch(function() { return {fields: []}; })
+  ]).then(function(results) {
+    var serverFields = (results[0] && results[0].fields) || [];
+    if (!allFields.length && serverFields.length) allFields = serverFields;
+    (results[1] && results[1].fields || []).forEach(function(item) {
+      enumMap[item.field_id] = item;
+    });
+    if (!allFields.length) {
+      // 字段接口失败时退回“有枚举的字段”
+      allFields = Object.keys(enumMap).map(function(key) {
+        return {field_id: key, name: enumMap[key].name || key};
+      });
+    }
+    fieldSel.innerHTML = '<option value="">请选择行权限字段</option>';
+    allFields.forEach(function(field) {
+      var opt = document.createElement('option');
+      opt.value = field.field_id;
+      opt.textContent = field.name || field.field_id;
+      if (field.field_id === existingField) opt.selected = true;
+      fieldSel.appendChild(opt);
+    });
+    renderValues();
+  });
+
+  function renderValueEditor(fieldId, values, selected) {
+    valueBox.innerHTML = '';
+    valueBox.className = 'multi-select-host';
+    if (values && values.length && window.createMultiSelect) {
+      var enumField = enumMap[fieldId] || {};
+      window.createMultiSelect(
+        valueBox, values, selected, 'row_values',
+        '搜索并选择' + (enumField.name || fieldId) + '值…');
+      return;
+    }
+    if (window.createTagInput) {
+      var fieldName = fieldId;
+      allFields.forEach(function(item) {
+        if (item.field_id === fieldId) fieldName = item.name || fieldId;
+      });
+      window.createTagInput(valueBox, selected, 'row_values',
+        '输入' + fieldName + '值，回车添加');
+    }
+  }
+  function renderValues() {
+    var fieldId = fieldSel.value;
+    valueBox.innerHTML = '';
+    valueBox.className = 'multi-select-host';
+    if (!fieldId) return;
+    var selected = fieldId === existingField ? existingValues : [];
+    if (fieldValues[fieldId] && fieldValues[fieldId].length) {
+      renderValueEditor(fieldId, fieldValues[fieldId], selected);
+      return;
+    }
+    var enumField = enumMap[fieldId];
+    if (enumField && (enumField.values || []).length) {
+      renderValueEditor(fieldId, enumField.values, selected);
+    } else {
+      valueBox.innerHTML = '<span class="muted">正在读取该字段的去重值…</span>';
+    }
+    fetch('/api/field-values?table=' + encodeURIComponent(tableId)
+          + '&field=' + encodeURIComponent(fieldId))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (fieldSel.value !== fieldId) return;
+        var values = (data && data.values) || [];
+        if (values.length) {
+          fieldValues[fieldId] = values;
+          renderValueEditor(fieldId, values, selected);
+          return;
+        }
+        if (!enumField || !(enumField.values || []).length) {
+          renderValueEditor(fieldId, [], selected);
+        }
+      })
+      .catch(function() {
+        if (fieldSel.value !== fieldId) return;
+        if (!enumField || !(enumField.values || []).length) {
+          renderValueEditor(fieldId, [], selected);
+        }
+      });
+  }
+  fieldSel.addEventListener('change', renderValues);
+})();
+</script>
+{% endif %}
+
+<div class="card">
+  <h2>审批链</h2>
+  <ul class="steps">
+    {% for step in req.steps %}
+    <li class="{% if step.action == 'approved' %}done{% elif loop.index0 == req.current_seq and req.status == 'pending' %}current{% endif %}">
+      <strong>{{ loop.index }}. {{ role_labels.get(step.role, step.role) }}</strong>
+      <span class="muted">审批人：{{ step.approver.name if step.approver else (step.approver_id or '未配置') }} · {{ step.action or 'pending' }}</span>
+      {% if step.comment %}<div class="muted">意见：{{ step.comment }}</div>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+
+{% if can_approve %}
+<div class="card">
+  <h2>审批操作</h2>
+  <form method="post" action="/requests/{{ req.id }}/approve" style="display:inline-block;margin-right:8px;">
+    <input type="text" name="comment" placeholder="审批意见（可选）" style="width:260px;">
+    <button type="submit">通过</button>
+  </form>
+  <form method="post" action="/requests/{{ req.id }}/reject" style="display:inline-block;">
+    <input type="text" name="comment" placeholder="驳回原因" style="width:260px;">
+    <button class="danger" type="submit">驳回</button>
+  </form>
+</div>
+{% endif %}
+
+{% if can_withdraw %}
+<div class="card">
+  <form method="post" action="/requests/{{ req.id }}/withdraw"><button class="secondary" type="submit">撤回申请</button></form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>评论</h2>
+  {% for c in req.comments %}
+  <div class="comment"><strong>{{ c.user.name if c.user else c.user_id }}</strong> <span class="muted">{{ c.created_at }}</span><div>{{ c.content }}</div></div>
+  {% else %}<p class="muted">暂无评论。</p>{% endfor %}
+  <form method="post" action="/requests/{{ req.id }}/comment">
+    <textarea name="content" placeholder="补充说明"></textarea>
+    <p><button class="secondary" type="submit">发表评论</button></p>
+  </form>
+</div>
+{% endblock %}
