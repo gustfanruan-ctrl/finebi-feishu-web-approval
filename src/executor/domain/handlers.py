@@ -116,12 +116,16 @@ def _write_subject(c, user, rid, payload):
 
 
 def _write_role(c, user, rid, payload):
-    return c.platform.set_user_roles(user, add=[rid])
+    add = list(dict.fromkeys([str(rid)] + [
+        str(value) for value in (payload.get("keep_roles") or []) if value]))
+    return c.platform.set_user_roles(user, add=add)
 
 
 def _write_department(c, user, rid, payload):
     # rid 是部门路径 JSON 字符串（如 '["财务部", "财务二部"]'）
-    return c.platform.set_user_departments(user, add=[rid])
+    add = list(dict.fromkeys([str(rid)] + [
+        str(value) for value in (payload.get("keep_departments") or []) if value]))
+    return c.platform.set_user_departments(user, add=add)
 
 
 def _write_platform_module(c, user, rid, payload):

@@ -27,7 +27,7 @@ from ..storage import Storage
 from .grant import (FULL_AUTHORITY_FIELDS, error_code_of, first_data,
                     groups_to_set_payload, merge_full_authority,
                     merge_rule_groups, normalize_type_map,
-                    row_rule_groups_from_read)
+                    require_current_data, row_rule_groups_from_read)
 from .jobs import (KIND_REVOKE, KIND_ROW_CLEAR, KIND_SHARE_REVOKE, JobService,
                    NullNotifier, is_retryable)
 
@@ -204,8 +204,11 @@ class RevokeService:
                     "kept_fields": sorted(kept)}
 
         handler = get_handler(rt)
-        current = first_data(handler.read(self.clients, user, rid))
-        authority = merge_full_authority(current if isinstance(current, dict) else {}, {})
+        current = require_current_data(handler.read(self.clients, user, rid),
+                                       "数据权限现状")
+        if not isinstance(current, dict):
+            raise BusinessError("回收前读取数据权限现状失败，已中止，避免覆盖存量权限")
+        authority = merge_full_authority(current, {})
         for field in FULL_AUTHORITY_FIELDS:
             if field in remaining:
                 authority[field] = False
@@ -221,8 +224,10 @@ class RevokeService:
     def _verify_authority(self, rt: str, user: str, rid: str,
                           authority: Dict[str, Any]) -> bool:
         handler = get_handler(rt)
-        current = first_data(handler.read(self.clients, user, rid))
-        current = current if isinstance(current, dict) else {}
+        current = require_current_data(handler.read(self.clients, user, rid),
+                                       "数据权限现状")
+        if not isinstance(current, dict):
+            raise BusinessError("回收后复核读取数据权限失败，已中止")
         return all(bool(current.get(field)) == bool(value)
                    for field, value in authority.items())
 
@@ -232,7 +237,8 @@ class RevokeService:
         user = ledger["user"]
         rid = str(ledger["resource_id"])
         handler = get_handler(ResourceType.ROW)
-        current = first_data(handler.read(self.clients, user, rid))
+        current = require_current_data(handler.read(self.clients, user, rid),
+                                       "行权限现状")
         groups, error = row_rule_groups_from_read(current, self.type_map)
         if error:
             return self._to_manual(
@@ -304,6 +310,8 @@ class RevokeService:
                     for group in expected_groups for condition in group}
         for attempt in range(2):
             current = first_data(handler.read(self.clients, user, rid))
+            if current is None:
+                return {"verified": "skipped（写后反查读取失败，未再次写回）"}
             groups, error = row_rule_groups_from_read(current, self.type_map)
             if error:
                 return {"verified": "skipped（写后反查无法解析：%s）" % error}
@@ -338,7 +346,8 @@ class RevokeService:
                 return {"skipped": True,
                         "reason": "该仪表板未纳入模板认证，无需回收模板授权"}
             raise
-        current = current if isinstance(current, dict) else {}
+        if not isinstance(current, dict):
+            raise BusinessError("回收前读取仪表板权限现状失败，已中止，避免误伤存量权限")
         view = bool(current.get("view"))
         export = bool(current.get("export"))
         if "view" in targets and not sibling_view:
@@ -376,8 +385,10 @@ class RevokeService:
         if not targets:
             return {"skipped": True, "reason": "台账未记录权限字段"}
         handler = get_handler(ResourceType.DASHBOARD_ENTRY)
-        current = first_data(handler.read(self.clients, user, rid))
-        current = current if isinstance(current, dict) else {}
+        current = require_current_data(
+            handler.read(self.clients, user, rid), "目录权限现状")
+        if not isinstance(current, dict):
+            raise BusinessError("回收前读取目录权限现状失败，已中止")
         sibling_view = any(
             bool(((s.get("payload") or {}).get("authority") or {}).get("viewPrivilege"))
             for s in siblings)

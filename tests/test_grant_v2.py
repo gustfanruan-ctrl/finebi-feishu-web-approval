@@ -107,7 +107,7 @@ class FakeFineBI:
     def get_row_filter(self, user, rid):
         self.calls.append(("get_row", user, rid))
         self._maybe_fail("get_row_filter")
-        return self._wrap(self.row.get((user, rid)))
+        return self._wrap(self.row.get((user, rid), ""))
 
     def set_row_filter(self, user, rid, row_filter):
         self.calls.append(("set_row", user, rid, dict(row_filter)))
@@ -508,19 +508,27 @@ class GrantV2Test(ServiceCase):
         self.assertEqual(self.storage.list_request_items(result.request_id)[0]["status"],
                          "failed")
 
-    def test_merge_rule_lists_rejects_multi_field_single_request(self):
-        """D-01 单元回归：合并函数不再把单申请单多字段逐条 OR。"""
-        from executor.services.grant import merge_rule_lists
+    def test_merge_rule_groups_preserves_existing_and_group(self):
+        """D-01 回归：已有 AND 组不能被拍平成单条件 OR；写回前必须转人工。"""
+        from executor.services.grant import merge_rule_groups
 
-        rules = [
+        existing = [[
             {"type": "strIn", "fieldId": "t_region", "filterValue": ["华东"]},
             {"type": "strIn", "fieldId": "t_channel", "filterValue": ["天猫"]},
-        ]
+        ]]
         with self.assertRaises(BusinessError):
-            merge_rule_lists([], rules)
-        single = merge_rule_lists([], [rules[0]])
-        self.assertEqual(single["type"], "or")
-        self.assertEqual(single["filterValue"][0]["fieldId"], "t_region")
+            merge_rule_groups(existing, [])
+
+    def test_merge_full_authority_rejects_missing_current(self):
+        """读不到五字段现状时不能按全 False 覆盖。"""
+        from executor.services.grant import merge_full_authority
+
+        with self.assertRaises(BusinessError):
+            merge_full_authority(None, {"usePrivilege": True})
+        merged = merge_full_authority(
+            {"usePrivilege": True, "managePrivilege": True},
+            {"usePrivilege": True})
+        self.assertTrue(merged["managePrivilege"])
 
     def test_row_duplicate_rule_skipped(self):
         rule = {"type": "strIn", "fieldId": "t_region", "filterValue": ["华东"]}

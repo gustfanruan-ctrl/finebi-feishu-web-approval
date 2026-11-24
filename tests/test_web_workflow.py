@@ -394,6 +394,15 @@ class WebWorkflowTest(unittest.TestCase):
 
     def test_dashboard_component_data_listed_and_granted_with_request(self):
         """依赖数据集只列在申请单里，组件数据随查看一起授权，不另建流程单。"""
+        self.service.catalog_rows_override = [
+            {"resource_type": "table", "resource_id": "t-1",
+             "name": "天猫客服销售日汇总表", "path": "A/t-1", "fields": []},
+            {"resource_type": "table", "resource_id": "t-2",
+             "name": "抖店客服销售数据日汇总表", "path": "A/t-2", "fields": []},
+            {"resource_type": "dashboard", "resource_id": "dash-1",
+             "entry_id": "entry-1", "name": "客服销售主题分析",
+             "path": "A/客服销售主题分析", "fields": []},
+        ]
         self._write_deps({"dash-1": {"name": "客服销售主题分析", "datasets": [
             {"resource_id": "t-2", "name": "抖店客服销售数据日汇总表"},
             {"resource_id": "t-1", "name": "天猫客服销售日汇总表"},
@@ -419,7 +428,7 @@ class WebWorkflowTest(unittest.TestCase):
                             for item in table_items))
 
     def test_dashboard_component_data_unmatched_keeps_request_visible(self):
-        """快照里没有依赖数据集时，保留用户勾选的组件数据并标记录入原因。"""
+        """快照里没有依赖数据集时，组件数据不进入权限项，但记录原因供审批人看到。"""
         self.service.deps_json = os.path.join(self.tmp.name, "no_deps.json")
         req = self.service.create_request("u_applicant", {
             "resource_id": "dash-2", "entry_id": "entry-2",
@@ -427,7 +436,7 @@ class WebWorkflowTest(unittest.TestCase):
             "permissions": ["view", "component"],
             "period_type": "temp", "days": 30,
         }, "dashboard")
-        self.assertEqual(req["payload"]["permissions"], ["view", "component"])
+        self.assertEqual(req["payload"]["permissions"], ["view"])
         self.assertEqual(req["payload"]["component_skipped_reason"],
                          "未匹配到依赖数据集")
 

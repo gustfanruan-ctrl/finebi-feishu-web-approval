@@ -93,6 +93,15 @@ class HandlerRegistryTest(unittest.TestCase):
         args, kwargs = self.platform.calls[0]
         self.assertEqual(kwargs.get("add"), ["电商-渠道运营"])
 
+    def test_role_write_keeps_existing_roles(self):
+        """防御性回归：即使 FineBI 把 add 当全量列表，也不能覆盖已有角色。"""
+        handler = get_handler("role")
+        handler.write(self.clients, "10086", "新角色",
+                      {"keep_roles": ["已有角色A", "已有角色B"]})
+        args, kwargs = self.platform.calls[0]
+        self.assertEqual(kwargs.get("add"),
+                         ["新角色", "已有角色A", "已有角色B"])
+
     def test_row_write(self):
         handler = get_handler(ResourceType.ROW)
         row_filter = {"type": "or", "filterValue": []}

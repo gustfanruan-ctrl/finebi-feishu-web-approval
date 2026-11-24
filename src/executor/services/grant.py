@@ -40,10 +40,21 @@ FULL_AUTHORITY_FIELDS = ("usePrivilege", "managePrivilege", "empowerPrivilege",
 # ---------------------------------------------------------------------------
 # 兼容旧模块的纯函数（revoke / 外部脚本仍可 import）
 # ---------------------------------------------------------------------------
-def merge_full_authority(current: dict, desired: dict) -> dict:
+def merge_full_authority(current: Optional[dict], desired: dict) -> dict:
+    """五字段全量写入：读不到现状必须中止，不能把未知当 False。"""
+    if current is None:
+        raise BusinessError("读取 FineBI 当前权限失败，已中止写入，避免覆盖存量权限")
     full = {field: bool((current or {}).get(field, False)) for field in FULL_AUTHORITY_FIELDS}
     full.update({k: v for k, v in (desired or {}).items() if k in full})
     return full
+
+
+def require_current_data(resp: Any, what: str = "权限现状") -> Any:
+    """从批量响应取现状；响应结构不符返回错误，不得当成“无权限”。"""
+    data = first_data(resp)
+    if data is None:
+        raise BusinessError("读取 FineBI %s失败（响应结构异常），已中止，避免覆盖存量" % what)
+    return data
 
 
 def first_data(resp: Any) -> Any:
@@ -51,41 +62,13 @@ def first_data(resp: Any) -> Any:
     if not isinstance(resp, dict):
         return None
     data = resp.get("data")
+    if isinstance(data, dict):
+        return data
     if isinstance(data, list) and data:
         item = data[0]
         if isinstance(item, dict):
             return item.get("data")
     return None
-
-
-def parse_row_filter(value: Any) -> List[Dict[str, Any]]:
-    """把 get 接口返回的行权限解析为规则列表（set 结构）。"""
-    if value is None:
-        return []
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return []
-    if isinstance(value, dict):
-        rules = value.get("filterValue")
-        if isinstance(rules, list):
-            return [r for r in rules if isinstance(r, dict)]
-    return []
-
-
-def merge_rule_lists(existing: Iterable[Dict[str, Any]],
-                     new_rules: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
-    """合并行权限规则（set 结构，保留给旧调用方/脚本的兼容入口）。
-
-    D-01 修复：``new_rules`` 是一张申请单的规则，语义上是 **一个 AND 组**，
-    不能在组内逐条 OR。POC-3 冻结嵌套 and 结构前，单请求含 ≥2 个字段
-    直接抛 :class:`BusinessError` 转人工；``existing`` 视为历史多条单条件组。
-    """
-    existing_groups = [[dict(rule)] for rule in existing if isinstance(rule, dict)]
-    new_groups = request_rule_groups(new_rules)
-    merged = merge_rule_groups(existing_groups, new_groups)
-    return groups_to_set_payload(merged)
 
 
 def normalize_type_map(mapping: Optional[Dict[Any, str]]) -> Dict[int, str]:
@@ -105,63 +88,6 @@ def normalize_type_map(mapping: Optional[Dict[Any, str]]) -> Dict[int, str]:
         except (TypeError, ValueError):
             continue
     return result
-
-
-def row_rules_from_read(raw: Any,
-                        type_map: Optional[Dict[int, str]] = None) -> Tuple[
-                            Optional[List[Dict[str, Any]]], Optional[str]]:
-    """把 get 返回的行权限现状解析为 set 结构规则。
-
-    返回 ``(rules, error)``：
-
-    - ``([], None)``：现状无规则；
-    - ``(rules, None)``：可规范化（本身是 set 结构，或 filterType 可映射）；
-    - ``(None, error)``：结构无法解析（转人工，不猜测）。
-
-    filterType 数字映射取自接口文档（and:34 or:35 str_in:10 strNotIn:12），
-    ``type_map`` 可覆盖；文档未定义的类型仍按 D4 转人工。
-    """
-    if raw is None or raw == "" or raw == {}:
-        return [], None
-    data = raw
-    if isinstance(raw, str):
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            return None, "行权限现状不是合法 JSON"
-    if not isinstance(data, dict):
-        return None, "行权限现状结构未知：%r" % type(data).__name__
-    rules = data.get("filterValue")
-    if not rules:
-        return [], None
-    if isinstance(rules, dict):
-        # 单条件节点：get 直接返回一个 strIn/strNotIn 节点
-        if type_map:
-            try:
-                expr = rowfilter.parse_get(data, type_map)
-            except rowfilter.RowFilterError as exc:
-                return None, "行权限现状解析失败：%s" % exc
-            return rowfilter.expr_to_rules(expr), None
-        return None, ("存量行权限为单条件数字结构，POC-3 映射未配置；"
-                      "按设计修订 V1.1 §3 转人工处理")
-    if not isinstance(rules, list):
-        return None, "行权限 filterValue 不是数组"
-    # 已是 set 结构（本执行器写回的格式）
-    set_rules = [r for r in rules
-                 if isinstance(r, dict)
-                 and r.get("type") in ("strIn", "strNotIn")
-                 and r.get("fieldId")]
-    if len(set_rules) == len(rules):
-        return set_rules, None
-    # get 返回的数字 filterType 结构：需要映射才能往返转换
-    if type_map:
-        try:
-            expr = rowfilter.parse_get(data, type_map)
-        except rowfilter.RowFilterError as exc:
-            return None, "行权限现状解析失败：%s" % exc
-        return rowfilter.expr_to_rules(expr), None
-    return None, ("存量行权限为 filterType 数字结构，POC-3 映射未配置；"
-                  "按设计修订 V1.1 §3 转人工处理")
 
 
 # ---------------------------------------------------------------------------
@@ -660,6 +586,9 @@ class PermissionService:
                         and is_template_auth_not_applicable(exc)):
                     return self._template_auth_skip_result()
                 raise
+            if first_data(current) is None:
+                raise BusinessError(
+                    "读取 FineBI 现状失败，已中止，避免把存量权限当成空覆盖")
             if self._satisfied(rt, item, desired, current, req.user):
                 if not self.adopt_existing:
                     self._notify_adopt_skip(req, item)
@@ -682,7 +611,7 @@ class PermissionService:
                 return {"status": "skipped", "reason": "存量权限已纳管为基线台账",
                         "changed": False, "ledger_id": ledger_id, "adopt_existing": True}
 
-        payload = self._build_payload(rt, item, desired, current)
+        payload = self._build_payload(rt, item, desired, current, req.user)
         if self.dry_run:
             return {"status": "skipped", "reason": "dry-run 未写权限", "changed": False,
                     "dry_run": True, "would_write": payload}
@@ -832,15 +761,17 @@ class PermissionService:
         return False
 
     def _build_payload(self, rt: str, item: Dict[str, Any], desired: Dict[str, Any],
-                       current: Any) -> Dict[str, Any]:
+                       current: Any, user: str = "") -> Dict[str, Any]:
         if rt in (ResourceType.FOLDER, ResourceType.TABLE):
-            cur = first_data(current)
-            return {"authority": merge_full_authority(
-                cur if isinstance(cur, dict) else {}, desired)}
+            cur = require_current_data(current, "数据权限现状")
+            if not isinstance(cur, dict):
+                raise BusinessError("数据权限现状响应结构异常，已中止")
+            return {"authority": merge_full_authority(cur, desired)}
         if rt == ResourceType.FIELD:
             return {"authority": {"biData": True}}
         if rt == ResourceType.ROW:
-            groups, error = row_rule_groups_from_read(first_data(current), self.type_map)
+            groups, error = row_rule_groups_from_read(
+                require_current_data(current, "行权限现状"), self.type_map)
             if error:
                 raise BusinessError(error)
             merged = merge_rule_groups(groups or [],
@@ -851,8 +782,9 @@ class PermissionService:
                                   "export": bool(desired.get("export"))}}
         if rt == ResourceType.DASHBOARD_ENTRY:
             # entry 权限是四字段全量覆盖：本次未申请的 edit/empower 保留现状
-            cur = first_data(current)
-            cur = cur if isinstance(cur, dict) else {}
+            cur = require_current_data(current, "仪表板目录权限现状")
+            if not isinstance(cur, dict):
+                raise BusinessError("仪表板目录权限现状响应结构异常，已中止")
             return {"authority": {
                 "viewPrivilege": bool(desired.get("viewPrivilege")),
                 "export": bool(desired.get("export")),
@@ -868,6 +800,16 @@ class PermissionService:
             return {"entry": entry}
         if rt == ResourceType.SUBJECT:
             return {"authority": {"use": True, "edit": bool(desired.get("edit"))}}
+        if rt == ResourceType.ROLE:
+            # 防御性保留：按 FineBI add/remove 语义本应追加，但不同版本若将 add
+            # 当全量列表处理，显式带上现有角色可避免把原有角色覆盖掉。
+            return {"keep_roles": user_roles(current, user),
+                    "role": item["resource_id"]}
+        if rt == ResourceType.DEPARTMENT:
+            keep = [json.dumps(path.split("/"), ensure_ascii=False)
+                    for path in user_departments(current, user) if path]
+            return {"keep_departments": keep,
+                    "department": item["resource_id"]}
         return {}
 
     def _verify(self, rt: str, item: Dict[str, Any], desired: Dict[str, Any],
@@ -1016,15 +958,16 @@ class PermissionService:
     def _baseline_fragment(self, rt: str, item: Dict[str, Any],
                            current: Any) -> Dict[str, Any]:
         """存量纳管（origin=baseline）时，台账记录“现状全部权限”，回收才能完整退回。"""
-        data = first_data(current)
+        data = require_current_data(current, "存量权限现状")
         if rt in (ResourceType.FOLDER, ResourceType.TABLE):
-            full = merge_full_authority(data if isinstance(data, dict) else {}, {})
+            if not isinstance(data, dict):
+                raise BusinessError("存量数据权限响应结构异常，已中止纳管")
+            full = merge_full_authority(data, {})
             return {"authority": {field: value for field, value in full.items() if value}}
         if rt == ResourceType.ROW:
             groups, error = row_rule_groups_from_read(data, self.type_map)
             if error:
-                # 无法解析现状时不纳管（避免覆盖存量规则），由调用方转人工
-                return {"authority": {}, "unparsed_rules": str(data)}
+                raise BusinessError("存量行权限无法解析，已中止纳管：" + error)
             groups = groups or []
             return {"rules": [group[0] for group in groups],
                     "filter": groups_to_set_payload(groups)}

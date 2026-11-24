@@ -150,7 +150,7 @@ class FakeFineBI:
     def get_row_filter(self, user: str, table_name: str) -> Dict[str, Any]:
         self._record("get_row", user, table_name)
         self._maybe_fail("get_row_filter")
-        return self._wrap(self.row.get((user, table_name)))
+        return self._wrap(self.row.get((user, table_name), ""))
 
     def set_row_filter(self, user: str, table_name: str,
                        row_filter: Dict[str, Any]) -> Dict[str, Any]:
