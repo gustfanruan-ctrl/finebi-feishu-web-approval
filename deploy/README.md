@@ -205,3 +205,5 @@ powershell -ExecutionPolicy Bypass -File scripts\package_deploy.ps1
 
 输出 `dist/finebi-feishu-deploy-<时间>.zip`（以及 `.tar.gz`），不包含 `.env`、
 数据库、本地 catalog/快照、`tools/ngrok.exe` 等本地资产。
+
+- 域名更换/旧链接失效处理：见 [域名更换操作手册.md](域名更换操作手册.md)。
