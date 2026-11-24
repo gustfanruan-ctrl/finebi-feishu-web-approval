@@ -60,3 +60,7 @@ python -m executor.cli web
 ## 说明
 
 FineBI 开放平台接口文档版权归帆软所有，本仓库仅用于项目集成参考；实际使用请以客户 FineBI 版本的官方文档为准。
+
+## 发布包
+
+- [v2026.11.23 部署包](https://github.com/gustfanruan-ctrl/finebi-feishu-web-approval/releases/tag/v2026.11.23)（脱敏，不含客户 .env/账号/Token）
