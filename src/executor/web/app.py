@@ -613,6 +613,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return JSONResponse({"fields": []}, status_code=401)
         if not table:
             return JSONResponse({"fields": []})
+        # 目录树里文件夹和数据集共用 resource_id，文件夹不能拿来读字段/枚举
+        if not service._table_row(table):
+            return JSONResponse({"fields": []})
         sample = (user or {}).get("fb_user") or ""
         return JSONResponse({"fields": service.row_values(table, sample)})
 
@@ -671,6 +674,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         table = request.query_params.get("table", "")
         if not table:
             return JSONResponse({"fields": []})
+        if not service._table_row(table):
+            return JSONResponse({"fields": [], "error": "不是公共数据集"},
+                                status_code=404)
         return JSONResponse({"fields": service.table_fields(table)})
 
     @app.get("/api/row-permission-status")

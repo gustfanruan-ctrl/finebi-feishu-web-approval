@@ -294,6 +294,34 @@ class ApprovalScopeTest(unittest.TestCase):
         self.assertEqual(result["source"], "data-api")
         self.assertEqual(result["values"], ["华东", "华南", "华北"])
 
+    def test_resources_table_excludes_folders_and_dashboards(self):
+        """目录按 table 查询时不能把文件夹/仪表板当数据集。"""
+        rows = self.service.resources("table", limit=100)
+        self.assertEqual([r["resource_id"] for r in rows], ["t1"])
+
+    def test_data_api_skips_folder_rows(self):
+        """连接测试只探测真正的 table；文件夹不能传给 v5 数据接口。"""
+        class FakeDataClient:
+            def __init__(self):
+                self.calls = []
+
+            def enabled(self):
+                return True
+
+            def preview(self, table_name, page_index=1, page_size=1000):
+                self.calls.append(table_name)
+                return ([{"fieldId": "f1", "name": "字段"}], [])
+
+        fake = FakeDataClient()
+        self.service.data_client = fake
+        self.service.catalog_rows_override = list(CATALOG) + [{
+            "resource_type": "folder", "resource_id": "p-cost",
+            "name": "成本+贴标+物流", "path": "A/成本+贴标+物流", "fields": []}]
+        result = self.service.test_data_api()
+        self.assertTrue(result["ok"], result["message"])
+        self.assertNotIn("成本+贴标+物流", fake.calls)
+        self.assertIn("t1", fake.calls)
+
     def test_dashboard_component_scope_saved_and_executed(self):
         deps_path = os.path.join(self.tmp.name, "deps.json")
         with open(deps_path, "w", encoding="utf-8") as fh:

@@ -104,6 +104,21 @@ cat data/directory_status.json
 - 改周期时同时改 timer 的 `OnCalendar` 与 `.env` 的
   `EXECUTOR_DIRECTORY_REFRESH_HOURS`（后者只影响页面“下次刷新”展示）。
 
+飞书通讯录同步单独使用 `finebi-contacts-refresh.timer`，默认每天 **00:00 和 12:00** 各同步一次：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now finebi-contacts-refresh.timer
+systemctl list-timers finebi-contacts-refresh.timer
+journalctl -u finebi-contacts-refresh.service -n 100 --no-pager
+```
+
+如果现场手工改过 timer，执行 `systemctl daemon-reload` 后再确认：
+
+```bash
+systemctl cat finebi-contacts-refresh.timer | grep OnCalendar
+```
+
 ### 2.2 cron（没有 systemd 时）
 
 `deploy/cron/finebi-directory-refresh` 是 `/etc/cron.d/` 格式：

@@ -1,8 +1,8 @@
 [Unit]
-Description=Refresh Feishu contact snapshot every day at 00:00
+Description=Refresh Feishu contact snapshot every day at 00:00 and 12:00
 
 [Timer]
-OnCalendar=*-*-* 00:00:00
+OnCalendar=*-*-* 00,12:00:00
 Persistent=true
 
 [Install]

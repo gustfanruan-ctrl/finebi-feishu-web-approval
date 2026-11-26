@@ -2606,6 +2606,11 @@ class WebApprovalService:
         rows = self._catalog_rows()
         if category == "dashboard":
             rows = [r for r in rows if r.get("resource_type") == "dashboard"]
+        elif category == "table":
+            # 只返回真正的数据集；目录里还有同级的 folder/dashboard 节点
+            rows = [r for r in rows if r.get("resource_type") == "table"]
+        elif category == "folder":
+            rows = [r for r in rows if r.get("resource_type") == "folder"]
         elif category == "public_data":
             rows = [r for r in rows if r.get("resource_type") in ("folder", "table")]
         return rows[:limit]
